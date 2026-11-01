@@ -70,9 +70,22 @@ function setTeacherId(id, name) {
   return s;
 }
 
+function getClearPassword() {
+  const s = getSettings();
+  return s.clearPassword || process.env.CLEAR_DATA_PASSWORD || 'pineapple123';
+}
+
+function setClearPassword(newPass) {
+  const s = getSettings();
+  s.clearPassword = String(newPass).trim();
+  saveSettings(s);
+  return s.clearPassword;
+}
+
 module.exports = {
   BOT_TOKEN: process.env.BOT_TOKEN,
   TIMEZONE: process.env.TIMEZONE || 'Asia/Phnom_Penh',
+  CLEAR_DATA_PASSWORD: process.env.CLEAR_DATA_PASSWORD || 'pineapple123',
   DATA_DIR,
   RECORDS_DIR,
   TEMP_DIR,
@@ -82,6 +95,9 @@ module.exports = {
   saveSettings,
   getTeacherId,
   setTeacherId,
+  getClearPassword,
+  setClearPassword,
   get CLASS_NAME() { return getSettings().className; },
   get TEACHER_NAME() { return getSettings().teacherName; }
 };
+

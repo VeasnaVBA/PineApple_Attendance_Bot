@@ -610,6 +610,39 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
   };
 }
 
+async function clearAttendanceDatabase() {
+  let sheetResult = null;
+  if (isGoogleSheetEnabled()) {
+    try {
+      sheetResult = await callGoogleSheet('clearAttendance');
+    } catch (err) {
+      console.error('[attendance] Error clearing Google Sheet attendance:', err.message);
+      sheetResult = { status: 'error', message: err.message };
+    }
+  }
+
+  // Clear in-memory cache
+  memoryDailyRecords = {};
+
+  // Clear local JSON records if any exist
+  try {
+    if (fs.existsSync(RECORDS_DIR)) {
+      const files = fs.readdirSync(RECORDS_DIR);
+      for (const f of files) {
+        if (f.startsWith('attendance-') && f.endsWith('.json')) {
+          try {
+            fs.unlinkSync(path.join(RECORDS_DIR, f));
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[attendance] Local records cleanup warning:', e.message);
+  }
+
+  return sheetResult || { status: 'success' };
+}
+
 module.exports = {
   getStudents,
   saveStudents,
@@ -623,5 +656,7 @@ module.exports = {
   saveDailyRecords,
   recordAttendance,
   getDayAttendanceStatus,
-  getRangeAttendanceStatus
+  getRangeAttendanceStatus,
+  clearAttendanceDatabase
 };
+

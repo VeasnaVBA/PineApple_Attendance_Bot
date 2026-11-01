@@ -9,6 +9,8 @@ const {
   TEACHER_NAME,
   getTeacherId,
   setTeacherId,
+  getClearPassword,
+  setClearPassword,
   getSettings
 } = require('./config');
 
@@ -32,7 +34,8 @@ const {
   getDailyRecords,
   recordAttendance,
   getDayAttendanceStatus,
-  getRangeAttendanceStatus
+  getRangeAttendanceStatus,
+  clearAttendanceDatabase
 } = require('./attendance');
 
 const {
@@ -182,7 +185,12 @@ bot.command('help', async (ctx) => {
 • \`/clean\` ឬ \`/clear\` - សម្អាត ៣០ សារចុងក្រោយ
 • \`/clean <ចំនួន>\` - សម្អាតតាមចំនួនកំណត់ (ឧ. \`/clean 50\`)
 • ឬចុចប៊ូតុង *[ 🧹 សម្អាតសារក្នុងឆាត ]*
-_🔒 ការសម្អាតសារ គឺលុបតែសារក្នុង Telegram ប៉ុណ្ណោះ ទិន្នន័យវត្តមាន និងសិស្សទាំងអស់ក្នុង Google Sheet / Database នៅតែមានពេញលេញ ១០០%!_`;
+_🔒 ការសម្អាតសារ គឺលុបតែសារក្នុង Telegram ប៉ុណ្ណោះ ទិន្នន័យវត្តមាន និងសិស្សទាំងអស់ក្នុង Google Sheet / Database នៅតែមានពេញលេញ ១០០%!_
+
+🗑 *៦. សម្អាតទិន្នន័យក្នុង Sheet (ទាមទារ Password):*
+• \`/cleardata <password>\` ឬ \`/clearsheet <password>\`
+  _លុបកំណត់ត្រាវត្តមានទាំងអស់ចេញពី Google Sheet និង Bot ទាំងស្រុង (ទុកបញ្ជីសិស្ស និងកាលវិភាគនៅដដែល)_
+• \`/setclearpassword <password_ថ្មី>\` - ផ្លាស់ប្តូរ Password សម្អាត Sheet (សម្រាប់តែលោកគ្រូ)`;
 
   await ctx.reply(helpText, { parse_mode: 'Markdown' });
 });
@@ -668,6 +676,95 @@ bot.callbackQuery('clean_dismiss', async (ctx) => {
   try {
     await ctx.deleteMessage();
   } catch (e) {}
+});
+
+// --- CLEAR SHEET DATA (Requires Token Password) ---
+bot.command(['cleardata', 'clearsheet'], async (ctx) => {
+  const text = ctx.message.text.trim();
+  const parts = text.split(/\s+/).slice(1);
+  const inputPassword = parts[0] ? parts[0].trim() : '';
+
+  // Delete message to avoid showing password in chat history
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
+
+  if (!inputPassword) {
+    return ctx.reply(
+      `⚠️ *ពាក្យបញ្ជាសម្អាតទិន្នន័យក្នុង Sheet (Clear Sheet Data)*\n\n` +
+      `⚠️ *ការព្រមាន:* ពាក្យបញ្ជានេះនឹងលុបទិន្នន័យវត្តមាន (Attendance Records) ទាំងអស់ចេញពី Google Sheet និង Bot!\n` +
+      `*(បញ្ជីឈ្មោះសិស្ស ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកដដែល)*\n\n` +
+      `🔑 *ដើម្បីអនុវត្ត សូមបញ្ចូល Password ភ្ជាប់ជាមួយពាក្យបញ្ជា:*\n` +
+      `\`/cleardata <password>\`\n` +
+      `ឬ\n` +
+      `\`/clearsheet <password>\`\n\n` +
+      `👉 *ឧទាហរណ៍:* \`/cleardata pineapple123\`\n\n` +
+      `🔒 _ចំណាំ: Password លំនាំដើមគឺ \`pineapple123\` (លោកគ្រូអាចផ្លាស់ប្តូរបានក្នុង .env ឬប្រើ /setclearpassword)_`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const expectedPassword = getClearPassword();
+  if (inputPassword !== expectedPassword) {
+    return ctx.reply(
+      `❌ *Password មិនត្រឹមត្រូវទេ! (Access Denied)*\n` +
+      `ប្រតិបត្តិការសម្អាតទិន្នន័យក្នុង Google Sheet ត្រូវបានបដិសេធ ដើម្បីសុវត្ថិភាព។`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const statusMsg = await ctx.reply('⏳ *កំពុងសម្អាតទិន្នន័យវត្តមានក្នុង Google Sheet... សូមរង់ចាំបន្តិច!*', {
+    parse_mode: 'Markdown'
+  });
+
+  const res = await clearAttendanceDatabase();
+
+  const successText =
+    `🗑 *បានសម្អាតទិន្នន័យក្នុង Google Sheet ជោគជ័យ! (Sheet Cleared)*\n\n` +
+    `✅ រាល់កំណត់ត្រាវត្តមាន (Attendance Records) ក្នុង Google Sheet ត្រូវបានលុបចេញស្អាត។\n` +
+    `✅ Bot Cache & Records ត្រូវបាន Reset។\n` +
+    `👥 បញ្ជីឈ្មោះសិស្សទាំង ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកពេញលេញ ១០០% ដដែល។\n\n` +
+    `✨ ឥឡូវនេះ លោកគ្រូ ឬប្រធានថ្នាក់ អាចចាប់ផ្តើមកត់ត្រាវត្តមានថ្មីស្រឡាងបានហើយ!`;
+
+  try {
+    await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, successText, {
+      parse_mode: 'Markdown'
+    });
+  } catch (e) {
+    await ctx.reply(successText, { parse_mode: 'Markdown' });
+  }
+});
+
+// /setclearpassword command (Teacher Only)
+bot.command('setclearpassword', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិកំណត់ Password សម្អាត Sheet គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+
+  // Delete message to hide new password
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
+
+  const parts = ctx.message.text.trim().split(/\s+/).slice(1);
+  const newPass = parts[0] ? parts[0].trim() : '';
+
+  if (!newPass || newPass.length < 4) {
+    return ctx.reply(
+      `❌ សូមបញ្ចូល Password ថ្មី (យ៉ាងតិច ៤ តួអក្សរ)!\n` +
+      `ទម្រង់: \`/setclearpassword <password_ថ្មី>\`\n` +
+      `ឧទាហរណ៍: \`/setclearpassword mypass2026\``,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  setClearPassword(newPass);
+  await ctx.reply(
+    `✅ *បានផ្លាស់ប្តូរ Password សម្អាត Sheet ជោគជ័យ!*\n` +
+    `🔑 *Password ថ្មីរបស់អ្នក:* \`${newPass}\`\n\n` +
+    `👉 ពេលចង់សម្អាតទិន្នន័យ សូមប្រើ: \`/cleardata ${newPass}\``,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 // Generate and send Excel report (STRICT TEACHER ONLY)
