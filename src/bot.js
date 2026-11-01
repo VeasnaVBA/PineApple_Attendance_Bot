@@ -1,0 +1,1275 @@
+const { Bot, InputFile, InlineKeyboard } = require('grammy');
+const dayjs = require('dayjs');
+const fs = require('fs');
+const path = require('path');
+
+const {
+  BOT_TOKEN,
+  CLASS_NAME,
+  TEACHER_NAME,
+  getTeacherId,
+  setTeacherId,
+  getSettings
+} = require('./config');
+
+const {
+  getCurrentSlot,
+  getTodaySlots,
+  getTimetable,
+  getSubjectsDict,
+  updateSubjectName,
+  DAYS,
+  KHMER_DAYS
+} = require('./timetable');
+
+const {
+  getStudents,
+  searchStudents,
+  addStudent,
+  updateStudent,
+  removeStudent,
+  parseAttendanceInput,
+  getDailyRecords,
+  recordAttendance,
+  getDayAttendanceStatus,
+  getRangeAttendanceStatus
+} = require('./attendance');
+
+const {
+  generateAttendanceExcel,
+  generateFullDayExcel,
+  generateRangeExcelReport
+} = require('./excelReport');
+
+if (!BOT_TOKEN || BOT_TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
+  console.error('\n⚠️  ERROR: BOT_TOKEN is not set in .env!');
+  process.exit(1);
+}
+
+const bot = new Bot(BOT_TOKEN);
+
+// Active interactive sessions for recording attendance: userId -> { dateStr, timeSlot, subject, code, timestamp }
+const pendingSessions = new Map();
+
+// Active interactive sessions for naming custom date range reports: userId -> { startDateStr, endDateStr }
+const pendingRangeRename = new Map();
+
+// Helper: Check if caller is Teacher
+function checkIsTeacher(ctx) {
+  const teacherId = getTeacherId();
+  if (!teacherId) return true;
+  return String(ctx.from?.id) === String(teacherId);
+}
+
+// /setteacher command
+bot.command('setteacher', async (ctx) => {
+  const currentTeacherId = getTeacherId();
+  const callerId = String(ctx.from.id);
+  const callerName = ctx.from.first_name || 'លោកគ្រូ';
+
+  if (currentTeacherId && currentTeacherId !== callerId) {
+    return ctx.reply('⚠️ លោកគ្រូបន្ទុកថ្នាក់ត្រូវបានកំណត់រួចហើយ។ មិនអាចផ្លាស់ប្តូរបានទេ!');
+  }
+
+  setTeacherId(callerId, callerName);
+  await ctx.reply(
+    `✅ *បានកំណត់លោកគ្រូជោគជ័យ!*\n` +
+    `👨‍🏫 *ឈ្មោះ:* ${callerName}\n` +
+    `🆔 *User ID:* \`${callerId}\`\n\n` +
+    `🔒 ចាប់ពីពេលនេះទៅ មានតែលោកគ្រូប៉ុណ្ណោះដែលអាច:\n` +
+    `• ទាញយករបាយការណ៍ Excel (/attendance)\n` +
+    `• បន្ថែម/កែប្រែ/លុបសិស្ស (/addstudent, /updatestudent, /removestudent)\n` +
+    `• កែសម្រួលឈ្មោះមុខវិជ្ជា (/editsubject)\n\n` +
+    `👉 ប្រធានថ្នាក់អាចធ្វើបានតែមួយគត់ គឺ *កត់ត្រាវត្តមាន*!`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// /teacher command
+bot.command('teacher', async (ctx) => {
+  const teacherId = getTeacherId();
+  if (!teacherId) {
+    return ctx.reply('⚠️ មិនទាន់មានលោកគ្រូចុះឈ្មោះទេ។ សូមវាយ `/setteacher` ដើម្បីចុះឈ្មោះជាលោកគ្រូ!', {
+      parse_mode: 'Markdown'
+    });
+  }
+  const isMe = String(ctx.from.id) === String(teacherId);
+  await ctx.reply(
+    `👨‍🏫 *ព័ត៌មានគ្រូបន្ទុកថ្នាក់:*\n` +
+    `• ឈ្មោះ: *${TEACHER_NAME}*\n` +
+    `• User ID: \`${teacherId}\`\n` +
+    `• តួនាទីរបស់អ្នក: *${isMe ? 'លោកគ្រូ (Teacher ✅)' : 'ប្រធានថ្នាក់ (Class Monitor)'}*`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// /start command
+bot.command('start', async (ctx) => {
+  const teacherId = getTeacherId();
+  if (!teacherId && ctx.chat.type === 'private') {
+    setTeacherId(ctx.from.id, ctx.from.first_name);
+  }
+
+  const welcomeText =
+`👋 *សួស្តី! សូមស្វាគមន៍មកកាន់ ${CLASS_NAME}*
+👨‍🏫 *គ្រូបន្ទុកថ្នាក់:* ${TEACHER_NAME}
+
+🤖 *ជំនួយការកត់ត្រាវត្តមានសិស្ស និងបង្កើតរបាយការណ៍ Excel:*
+
+📌 *របៀបប្រើប្រាស់:*
+1️⃣ *សម្រាប់ប្រធានថ្នាក់ ឬលោកគ្រូ (កត់ត្រាវត្តមាន):*
+• ចុចប៊ូតុង *[ ✍️ កត់ត្រាវត្តមាន ]* ខាងក្រោម
+• ជ្រើសរើស **កាលបរិច្ឆេទ (Date)** ➡️ **ម៉ោង (Time)** ➡️ ឃើញ **មុខវិជ្ជា (Subject)**
+• រួចវាយឈ្មោះ ឬលេខរៀងសិស្សដែល អវត្តមាន(A), ច្បាប់(P), ឬ យឺត(L) រួចចុច Send!
+*(សិស្សផ្សេងទៀត គឺប្រព័ន្ធកត់ត្រាថា "មានវត្តមាន" ទាំងអស់ដោយស្វ័យប្រវត្តិ!)*
+
+2️⃣ *សម្រាប់លោកគ្រូ (ទាញយករបាយការណ៍):*
+វាយពាក្យ \`attendance\` ឬ /attendance នោះ Bot នឹងផ្ញើឯកសារ Excel (.xlsx) ជូនលោកគ្រូ!
+*(🔒 របាយការណ៍ Excel ផ្ញើជូនតែលោកគ្រូប៉ុណ្ណោះ ប្រធានថ្នាក់មិនអាចទាញយកបានទេ)*`;
+
+  const keyboard = new InlineKeyboard()
+    .text('✍️ កត់ត្រាវត្តមាន (Record Attendance)', 'cmd_start_record')
+    .row()
+    .text('📥 របាយការណ៍ប្រចាំថ្ងៃ (Daily Excel)', 'cmd_attendance')
+    .text('📆 របាយការណ៍ប្រចាំខែ (Monthly)', 'cmd_monthly')
+    .row()
+    .text('📅 កាលវិភាគថ្ងៃនេះ', 'cmd_today')
+    .text('👥 បញ្ជីឈ្មោះសិស្ស', 'cmd_students');
+
+  await ctx.reply(welcomeText, { parse_mode: 'Markdown', reply_markup: keyboard });
+});
+
+// /help command
+bot.command('help', async (ctx) => {
+  const isTeacher = checkIsTeacher(ctx);
+
+  let helpText =
+`📖 *ការណែនាំអំពីការប្រើប្រាស់ Bot:*
+
+✍️ *១. របៀបកត់ត្រាវត្តមាន:*
+• វាយបញ្ជា \`/record\` ឬចុចប៊ូតុង *[ ✍️ កត់ត្រាវត្តមាន ]*
+• ជ្រើសរើស **ថ្ងៃ (Date)** ➡️ ជ្រើសរើស **ម៉ោង (Time)**
+• បន្ទាប់មកវាយឈ្មោះ ឬលេខរៀងសិស្ស រួចចុច Send:
+\`\`\`
+ឆោម ចិន A
+ខា សិនហួ P (ឈឺ)
+06 L
+\`\`\`
+
+🔍 *២. របៀបស្វែងរកឈ្មោះសិស្ស (ពេលភ្លេចឈ្មោះ):*
+• \`/find <ឈ្មោះ ឬ លេខរៀង>\` (ឧ. \`/find ចិន\` ឬ \`/find 04\`)
+• \`/students\` (មើលបញ្ជីឈ្មោះសិស្សទាំងអស់)
+
+🗓️ *៣. ពិនិត្យកាលវិភាគ:*
+• \`/today\` (មើលម៉ោង និងមុខវិជ្ជាថ្ងៃនេះ)
+• \`/timetable\` (មើលកាលវិភាគប្រចាំសប្តាហ៍)`;
+
+  if (isTeacher) {
+    helpText += `\n\n🔒 *៤. បញ្ជាផ្តាច់មុខសម្រាប់លោកគ្រូ (Teacher Only):*
+• \`/attendance\` - របាយការណ៍ប្រចាំថ្ងៃ (ឬ \`/attendance 01-10-2026\`)
+• \`/monthly\` - របាយការណ៍សង្ខេបប្រចាំខែ (Monthly Report)
+• \`/range <ថ្ងៃចាប់ផ្តើម> to <ថ្ងៃបញ្ចប់>\`
+  _ឧទាហរណ៍:_ \`/range 01-10-2026 to 31-10-2026\`
+• \`/addstudent <លេខរៀង> <ឈ្មោះ> <ភេទ> [ថ្ងៃខែឆ្នាំកំណើត]\`
+• \`/updatestudent <លេខរៀង> <ឈ្មោះកែសម្រួល>\`
+• \`/removestudent <លេខរៀង ឬ ឈ្មោះ>\`
+• \`/editsubject <CODE> <ឈ្មោះជាភាសាខ្មែរ>\``;
+  }
+
+  await ctx.reply(helpText, { parse_mode: 'Markdown' });
+});
+
+// /students command
+bot.command('students', async (ctx) => {
+  const students = getStudents();
+  if (students.length === 0) {
+    return ctx.reply('មិនទាន់មានទិន្នន័យសិស្សនៅឡើយទេ។');
+  }
+
+  let text = `👥 *បញ្ជីឈ្មោះសិស្ស (${students.length} នាក់) - ${CLASS_NAME}:*\n\n`;
+  students.forEach((s) => {
+    const dob = s.dob ? ` (${s.dob})` : '';
+    text += `${s.id}. *${s.name}* - ភេទ: ${s.gender}${dob}\n`;
+  });
+
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+// /find or /search command
+async function handleFindStudent(ctx) {
+  const parts = ctx.message.text.split(/\s+/).slice(1);
+  const query = parts.join(' ').trim();
+
+  if (!query) {
+    return ctx.reply(
+      '🔍 *សូមបញ្ជាក់ឈ្មោះ ឬលេខរៀងសិស្សដែលចង់ស្វែងរក!*\n' +
+      '• របៀបប្រើ: `/find <ឈ្មោះ ឬ លេខរៀង>`\n' +
+      '• ឧទាហរណ៍:\n' +
+      '  - `/find ចិន`\n' +
+      '  - `/find ហេង`\n' +
+      '  - `/find 04`\n\n' +
+      '💡 ឬវាយ `/students` ដើម្បីមើលបញ្ជីសិស្សទាំងអស់។',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const results = searchStudents(query);
+
+  if (results.length === 0) {
+    return ctx.reply(
+      `⚠️ រកមិនឃើញសិស្សដែលមានពាក្យគន្លឹះ "${query}" ទេ។\nសូមវាយ \`/students\` ដើម្បីផ្ទៀងផ្ទាត់បញ្ជីឈ្មោះ។`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  let text = `🔍 *លទ្ធផលស្វែងរក "${query}" (រកឃើញ ${results.length} នាក់):*\n\n`;
+  results.forEach(s => {
+    const dob = s.dob ? ` (កើត: ${s.dob})` : '';
+    text += `• លេខរៀង \`${s.id}\` - *${s.name}* (${s.gender})${dob}\n`;
+  });
+
+  text += `\n✍️ *របៀបកត់វត្តមាន:*\n`;
+  const first = results[0];
+  text += `• \`${first.id} A\` ឬ \`${first.name} A\` (អវត្តមាន)\n`;
+  text += `• \`${first.id} P\` ឬ \`${first.name} P\` (សុំច្បាប់)\n`;
+  text += `• \`${first.id} L\` ឬ \`${first.name} L\` (មកយឺត)`;
+
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+}
+
+bot.command('find', handleFindStudent);
+bot.command('search', handleFindStudent);
+bot.command('s', handleFindStudent);
+
+// --- INTERACTIVE ATTENDANCE RECORDING FLOW ---
+// Step 1: Prompt Choose Date
+async function promptChooseDate(ctx) {
+  const now = dayjs();
+  const todayStr = now.format('YYYY-MM-DD');
+  const todayKhmer = KHMER_DAYS[DAYS[now.day()]];
+
+  const yesterday = now.subtract(1, 'day');
+  const yesterdayStr = yesterday.format('YYYY-MM-DD');
+  const yesterdayKhmer = KHMER_DAYS[DAYS[yesterday.day()]];
+
+  const tomorrow = now.add(1, 'day');
+  const tomorrowStr = tomorrow.format('YYYY-MM-DD');
+  const tomorrowKhmer = KHMER_DAYS[DAYS[tomorrow.day()]];
+
+  const keyboard = new InlineKeyboard()
+    .text(`📅 ថ្ងៃនេះ (${todayKhmer}, ${now.format('DD/MM')})`, `rec_date_${todayStr}`)
+    .row()
+    .text(`📅 ម្សិលមិញ (${yesterdayKhmer}, ${yesterday.format('DD/MM')})`, `rec_date_${yesterdayStr}`)
+    .row()
+    .text(`📅 ថ្ងៃស្អែក (${tomorrowKhmer}, ${tomorrow.format('DD/MM')})`, `rec_date_${tomorrowStr}`)
+    .row()
+    .text('❌ បោះបង់ (Cancel)', 'rec_cancel');
+
+  const text =
+`📋 *កត់ត្រាវត្តមានសិស្ស (Record Attendance)*
+👉 *ជំហានទី ១:* សូមជ្រើសរើស **កាលបរិច្ឆេទ (Date)** ខាងក្រោម៖`;
+
+  if (ctx.callbackQuery) {
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  } else {
+    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  }
+}
+
+// Commands to trigger record flow
+bot.command('record', promptChooseDate);
+bot.command('mark', promptChooseDate);
+bot.callbackQuery('cmd_start_record', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await promptChooseDate(ctx);
+});
+
+// Step 2: Handle Date chosen -> Prompt Choose Time Slot
+bot.callbackQuery(/^rec_date_(.+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const dateStr = ctx.match[1];
+  const targetDate = dayjs(dateStr);
+  const dayName = DAYS[targetDate.day()];
+  const khmerDay = KHMER_DAYS[dayName];
+
+  const slots = getTodaySlots(targetDate);
+
+  if (slots.length === 0) {
+    const keyboard = new InlineKeyboard()
+      .text('🔙 ជ្រើសរើសថ្ងៃផ្សេង', 'cmd_start_record')
+      .row()
+      .text('❌ បោះបង់', 'rec_cancel');
+
+    return ctx.editMessageText(
+      `📅 *កាលបរិច្ឆេទ: ថ្ងៃ${khmerDay} (${targetDate.format('DD-MM-YYYY')})*\n\n` +
+      `⚠️ មិនមានម៉ោងសិក្សាក្នុងកាលវិភាគសម្រាប់ថ្ងៃនេះទេ។`,
+      { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+  }
+
+  const keyboard = new InlineKeyboard();
+  slots.forEach(slot => {
+    keyboard.text(
+      `⏰ ${slot.start}-${slot.end}: ${slot.subject}`,
+      `rec_slot_${dateStr}_${slot.start.replace(':', '')}_${slot.end.replace(':', '')}`
+    ).row();
+  });
+  keyboard.text('🔙 ថយក្រោយ (Back)', 'cmd_start_record').text('❌ បោះបង់', 'rec_cancel');
+
+  const text =
+`📋 *កត់ត្រាវត្តមានសិស្ស (Record Attendance)*
+📅 *កាលបរិច្ឆេទ:* ថ្ងៃ${khmerDay}, ${targetDate.format('DD MMMM YYYY')}
+
+👉 *ជំហានទី ២:* សូមជ្រើសរើស **ម៉ោងសិក្សា (Time Slot)** ដើម្បីកត់វត្តមាន៖`;
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+});
+
+// Step 3: Handle Time Slot chosen -> Show confirmed subject and prompt to type student names!
+bot.callbackQuery(/^rec_slot_([^_]+)_([^_]+)_(.+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const dateStr = ctx.match[1];
+  const rawStart = ctx.match[2];
+  const rawEnd = ctx.match[3];
+
+  const startTime = rawStart.length === 4 ? `${rawStart.slice(0, 2)}:${rawStart.slice(2)}` : rawStart;
+  const endTime = rawEnd.length === 4 ? `${rawEnd.slice(0, 2)}:${rawEnd.slice(2)}` : rawEnd;
+
+  const targetDate = dayjs(dateStr);
+  const dayName = DAYS[targetDate.day()];
+  const khmerDay = KHMER_DAYS[dayName];
+
+  const timetable = getTimetable();
+  const slot = timetable.find(s =>
+    s.day.toLowerCase() === dayName.toLowerCase() &&
+    s.start === startTime &&
+    s.end === endTime
+  );
+
+  const subject = slot ? slot.subject : 'មុខវិជ្ជាទូទៅ';
+  const code = slot ? slot.code : '';
+
+  // Save session for this user
+  pendingSessions.set(ctx.from.id, {
+    dateStr,
+    timeSlot: `${startTime} - ${endTime}`,
+    subject,
+    code,
+    khmerDay,
+    chatId: ctx.chat.id,
+    timestamp: Date.now()
+  });
+
+  const promptText =
+`✅ *បានជ្រើសរើសមុខវិជ្ជា និងម៉ោងរួចរាល់!*
+📅 *កាលបរិច្ឆេទ:* ថ្ងៃ${khmerDay}, ${targetDate.format('DD-MM-YYYY')}
+⏰ *ម៉ោងសិក្សា:* \`${startTime} - ${endTime}\`
+📚 *មុខវិជ្ជា:* *${subject}*
+
+👇 *ជំហានទី ៣:* សូមវាយឈ្មោះ ឬលេខរៀងសិស្សដែល អវត្តមាន(A), សុំច្បាប់(P), ឬ មកយឺត(L) រួចចុច **Send/Enter**:
+
+*ឧទាហរណ៍:*
+\`\`\`
+ឆោម ចិន A
+06 L
+ខា សិនហួ P (ឈឺ)
+\`\`\`
+_(💡 សិស្សដែលមិនបានសរសេរ គឺប្រព័ន្ធកត់ត្រាថា "មានវត្តមាន" ទាំងអស់ដោយស្វ័យប្រវត្តិ)_
+_(វាយ \`/cancel\` ប្រសិនបើចង់បោះបង់)_`;
+
+  const keyboard = new InlineKeyboard().text('❌ បោះបង់ (Cancel)', 'rec_cancel');
+  await ctx.editMessageText(promptText, { parse_mode: 'Markdown', reply_markup: keyboard });
+});
+
+// Cancel active recording session
+bot.callbackQuery('rec_cancel', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  pendingSessions.delete(ctx.from.id);
+  await ctx.editMessageText('❌ បានបោះបង់ការកត់ត្រាវត្តមាន។');
+});
+
+// /today command
+bot.command('today', async (ctx) => {
+  const now = dayjs();
+  const dayName = DAYS[now.day()];
+  const khmerDay = KHMER_DAYS[dayName];
+  const slots = getTodaySlots(now);
+  const currentSlot = getCurrentSlot(now);
+
+  if (slots.length === 0) {
+    return ctx.reply(`📅 *ថ្ងៃនេះជាថ្ងៃ ${khmerDay} (${dayName})*\nមិនមានម៉ោងសិក្សាទេ!`, { parse_mode: 'Markdown' });
+  }
+
+  let text = `📅 *កាលវិភាគថ្ងៃនេះ (ថ្ងៃ${khmerDay}, ${now.format('DD-MM-YYYY')}):*\n\n`;
+  slots.forEach(s => {
+    const isCurrent = currentSlot && currentSlot.start === s.start;
+    const badge = isCurrent ? ' 👉 *(ម៉ោងបច្ចុប្បន្ន)*' : '';
+    text += `⏰ \`${s.start} - ${s.end}\`: *${s.subject}* ${badge}\n`;
+  });
+
+  if (currentSlot) {
+    text += `\n🎯 *មុខវិជ្ជាបច្ចុប្បន្ន:* *${currentSlot.subject}* (\`${currentSlot.start} - ${currentSlot.end}\`)`;
+  }
+
+  const keyboard = new InlineKeyboard().text('✍️ កត់ត្រាវត្តមានម៉ោងនេះ', 'cmd_start_record');
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+});
+
+// /timetable command
+bot.command('timetable', async (ctx) => {
+  const timetable = getTimetable();
+  if (timetable.length === 0) {
+    return ctx.reply('មិនទាន់មានកាលវិភាគនៅឡើយទេ។');
+  }
+
+  const grouped = {};
+  timetable.forEach(slot => {
+    if (!grouped[slot.day]) grouped[slot.day] = [];
+    grouped[slot.day].push(slot);
+  });
+
+  let text = `🗓️ *កាលវិភាគប្រចាំសប្តាហ៍ - ${CLASS_NAME}*\n\n`;
+  for (const day of ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) {
+    if (grouped[day] && grouped[day].length > 0) {
+      text += `📌 *ថ្ងៃ${KHMER_DAYS[day]} (${day}):*\n`;
+      grouped[day].forEach(s => {
+        text += `  • \`${s.start} - ${s.end}\`: *${s.subject}*\n`;
+      });
+      text += '\n';
+    }
+  }
+
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+// /subjects command
+bot.command('subjects', async (ctx) => {
+  const dict = getSubjectsDict();
+  let text = `📚 *បញ្ជីមុខវិជ្ជា និងកូដ:*\n\n`;
+  for (const [code, name] of Object.entries(dict)) {
+    text += `• \`${code}\` ➡️ *${name}*\n`;
+  }
+  if (checkIsTeacher(ctx)) {
+    text += `\n💡 *របៀបកែសម្រួលឈ្មោះ:* វាយ \`/editsubject <CODE> <ឈ្មោះថ្មី>\`\n_ឧទាហរណ៍:_ \`/editsubject M2 គណិតវិទ្យា\``;
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+// /editsubject command (Teacher Only)
+bot.command('editsubject', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិកែប្រែឈ្មោះមុខវិជ្ជា គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+
+  const parts = ctx.message.text.split(/\s+/).slice(1);
+  if (parts.length < 2) {
+    return ctx.reply(
+      '❌ *ទម្រង់មិនត្រឹមត្រូវ!*\nរបៀបប្រើ: `/editsubject <CODE> <ឈ្មោះមុខវិជ្ជាថ្មី>`\nឧទាហរណ៍: `/editsubject M2 គណិតវិទ្យា`',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const code = parts[0].toUpperCase();
+  const newName = parts.slice(1).join(' ').trim();
+
+  updateSubjectName(code, newName);
+  await ctx.reply(`✅ បានកែសម្រួលមុខវិជ្ជាកូដ \`${code}\` ទៅជា: *${newName}* ដោយជោគជ័យ!`, {
+    parse_mode: 'Markdown'
+  });
+});
+
+// /addstudent command (Teacher Only)
+bot.command('addstudent', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិបន្ថែមសិស្ស គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+
+  const parts = ctx.message.text.split(/\s+/).slice(1);
+  if (parts.length < 2) {
+    return ctx.reply(
+      '❌ *ទម្រង់មិនត្រឹមត្រូវ!*\nរបៀបប្រើ: `/addstudent <លេខរៀង> <ឈ្មោះ> <ភេទ> [ថ្ងៃខែឆ្នាំកំណើត]`\nឧទាហរណ៍: `/addstudent 31 សុខ សាន ប្រុស 12/04/2012`',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const id = parts[0];
+  let gender = 'មិនបញ្ជាក់';
+  let dob = '';
+  let nameParts = parts.slice(1);
+
+  if (nameParts.length > 0 && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(nameParts[nameParts.length - 1])) {
+    dob = nameParts.pop();
+  }
+
+  if (nameParts.length > 0) {
+    const gCheck = nameParts[nameParts.length - 1];
+    if (['ប្រុស', 'ស្រី', 'ប', 'ស', 'male', 'female', 'm', 'f'].includes(gCheck.toLowerCase())) {
+      if (['ស្រី', 'ស', 'female', 'f'].includes(gCheck.toLowerCase())) gender = 'ស្រី';
+      else gender = 'ប្រុស';
+      nameParts.pop();
+    }
+  }
+
+  const fullName = nameParts.join(' ').trim();
+  addStudent(id, fullName, gender, dob);
+
+  await ctx.reply(`✅ បានបញ្ចូលសិស្សថ្មី: *${fullName}* (លេខរៀង: \`${id}\`, ភេទ: ${gender}${dob ? `, ថ្ងៃខែ: ${dob}` : ''}) ដោយជោគជ័យ!`, {
+    parse_mode: 'Markdown'
+  });
+});
+
+// /updatestudent command (Teacher Only)
+bot.command('updatestudent', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិកែប្រែព័ត៌មានសិស្ស គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+
+  const parts = ctx.message.text.split(/\s+/).slice(1);
+  if (parts.length < 2) {
+    return ctx.reply('❌ របៀបប្រើ: `/updatestudent <លេខរៀង> <ឈ្មោះកែសម្រួល>`\nឧទាហរណ៍: `/updatestudent 04 ឆោម ចិនណា`', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const id = parts[0];
+  const newName = parts.slice(1).join(' ').trim();
+  const updated = updateStudent(id, newName);
+
+  if (updated) {
+    await ctx.reply(`✅ បានកែសម្រួលឈ្មោះសិស្សលេខ \`${id}\` ទៅជា: *${newName}* រួចរាល់!`, {
+      parse_mode: 'Markdown'
+    });
+  } else {
+    await ctx.reply(`⚠️ រកមិនឃើញសិស្សដែលមានលេខរៀង \`${id}\` ទេ។`, { parse_mode: 'Markdown' });
+  }
+});
+
+// /removestudent command (Teacher Only)
+bot.command('removestudent', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិលុបសិស្ស គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+
+  const query = ctx.message.text.split(/\s+/).slice(1).join(' ').trim();
+  if (!query) {
+    return ctx.reply('❌ សូមបញ្ជាក់លេខរៀង ឬឈ្មោះសិស្សដែលចង់លុប។\nឧទាហរណ៍: `/removestudent 30`', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const removed = removeStudent(query);
+  if (removed) {
+    await ctx.reply(`✅ បានលុបសិស្ស "${query}" ចេញពីបញ្ជីរៀនរួចរាល់។`);
+  } else {
+    await ctx.reply(`⚠️ រកមិនឃើញសិស្សដែលមានឈ្មោះ ឬលេខរៀង "${query}" ទេ។`);
+  }
+});
+
+// /id command
+bot.command('id', async (ctx) => {
+  const isMeTeacher = checkIsTeacher(ctx);
+  await ctx.reply(
+    `🆔 *ព័ត៌មានអត្តសញ្ញាណ (IDs):*\n` +
+    `• *Group Chat ID:* \`${ctx.chat.id}\`\n` +
+    `• *Your User ID:* \`${ctx.from.id}\`\n` +
+    `• *Chat Type:* ${ctx.chat.type}\n` +
+    `• *តួនាទីរបស់អ្នក:* ${isMeTeacher ? 'លោកគ្រូ (Teacher ✅)' : 'ប្រធានថ្នាក់ (Monitor)'}`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// Generate and send Excel report (STRICT TEACHER ONLY)
+// Prompt Date Selection for Full-Day Attendance Report
+async function promptChooseReportDate(ctx) {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!* ប្រធានថ្នាក់មិនអាចទាញយកបានទេ។', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const now = dayjs();
+  const dayName = DAYS[now.day()];
+  const isSunday = now.day() === 0;
+
+  const yesterday = now.subtract(1, 'day');
+  const yesterdayStr = yesterday.format('YYYY-MM-DD');
+  const yesterdayDayName = DAYS[yesterday.day()];
+  const yesterdayKhmer = KHMER_DAYS[yesterdayDayName];
+
+  const keyboard = new InlineKeyboard();
+
+  if (isSunday) {
+    // Sunday has no timetable! Offer past school days (Saturday, Friday, etc.)
+    for (let i = 1; i <= 6; i++) {
+      const pastD = now.subtract(i, 'day');
+      const pStr = pastD.format('YYYY-MM-DD');
+      const pDayName = DAYS[pastD.day()];
+      const pKhmer = KHMER_DAYS[pDayName];
+      const label = i === 1
+        ? `📅 ថ្ងៃ${pKhmer} (ម្សិលមិញ - ${pastD.format('DD/MM')})`
+        : `📅 ថ្ងៃ${pKhmer} (${pastD.format('DD/MM')})`;
+      keyboard.text(label, `get_fullday_${pStr}`).row();
+    }
+
+    const text =
+`📅 *ថ្ងៃនេះជាថ្ងៃអាទិត្យ (Sunday) មិនមានកាលវិភាគសិក្សាទេ!*
+
+👉 សូមជ្រើសរើសថ្ងៃដែលលោកគ្រូចង់ទាញយក **របាយការណ៍ពេញមួយថ្ងៃ (Full Day Report)** ខាងក្រោម៖`;
+
+    if (ctx.callbackQuery) {
+      return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  }
+
+  // Weekday (Monday to Saturday)
+  const todayStr = now.format('YYYY-MM-DD');
+  const todayKhmer = KHMER_DAYS[dayName];
+
+  keyboard
+    .text(`📅 របាយការណ៍ថ្ងៃនេះពេញមួយថ្ងៃ (${todayKhmer}, ${now.format('DD/MM')})`, `get_fullday_${todayStr}`)
+    .row()
+    .text(`📅 របាយការណ៍ម្សិលមិញ (${yesterdayKhmer}, ${yesterday.format('DD/MM')})`, `get_fullday_${yesterdayStr}`)
+    .row()
+    .text('📅 ជ្រើសរើសថ្ងៃមុនៗ... (Past Days)', 'list_past_report_days');
+
+  const text =
+`📊 *ជ្រើសរើសរបាយការណ៍វត្តមានពេញមួយថ្ងៃ (Full Day Report):*
+👉 សូមជ្រើសរើសកាលបរិច្ឆេទដែលចង់ទាញយកឯកសារ Excel ខាងក្រោម៖`;
+
+  if (ctx.callbackQuery) {
+    return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  }
+  return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+// Generate and send FULL-DAY Excel report
+async function sendFullDayReport(ctx, dateStr) {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!*', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const dayStatus = getDayAttendanceStatus(dateStr, { DAYS, KHMER_DAYS, getTodaySlots });
+
+  if (!dayStatus.hasTimetable) {
+    return ctx.reply(`⚠️ *ថ្ងៃ${dayStatus.khmerDay} (${dayjs(dateStr).format('DD-MM-YYYY')}) មិនមានកាលវិភាគសិក្សាទេ!*`, {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  try {
+    const { filePath, filename } = await generateFullDayExcel(dayStatus);
+
+    // Build session status list for caption
+    let sessionLines = '';
+    dayStatus.scheduledSessions.forEach(s => {
+      const icon = s.isRecorded ? '✅' : '⚠️';
+      const statusNote = s.isRecorded
+        ? `បានកត់ត្រា (ដោយ ${s.recordedBy})`
+        : `*ប្រធានថ្នាក់ភ្លេចកត់ត្រា!*`;
+      sessionLines += `• ⏰ \`${s.timeSlot}\` (${s.code || s.subject}): ${icon} ${statusNote}\n`;
+    });
+
+    const caption =
+`📊 *របាយការណ៍វត្តមានសិស្សពេញមួយថ្ងៃ (Full Day Report)*
+🏫 *ថ្នាក់:* ${CLASS_NAME}
+📅 *កាលបរិច្ឆេទ:* ថ្ងៃ${dayStatus.khmerDay}, ${dayjs(dateStr).format('DD MMMM YYYY')}
+👨‍🏫 *គ្រូបន្ទុកថ្នាក់:* ${TEACHER_NAME}
+
+⏰ *ស្ថានភាពម៉ោងសិក្សា (${dayStatus.totalSessions} ម៉ោងសរុប):*
+${sessionLines}
+📌 *សរុប:* បានកត់ត្រា *${dayStatus.recordedCount}* ម៉ោង | ⚠️ ភ្លេចកត់ត្រា *${dayStatus.missedCount}* ម៉ោង
+👥 *សិស្សសរុប:* ${dayStatus.students.length} នាក់
+
+📁 _ឯកសារ Excel មានតារាងរួមគ្រប់មុខវិជ្ជា និងសន្លឹកកិច្ចការលម្អិតតាមម៉ោងនីមួយៗ!_`;
+
+    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+    const teacherId = getTeacherId();
+
+    if (isGroup && teacherId) {
+      try {
+        await bot.api.sendDocument(teacherId, new InputFile(filePath, filename), {
+          caption: `🔒 *[ផ្ញើដោយសម្ងាត់ពីគ្រុប]*\n\n` + caption,
+          parse_mode: 'Markdown'
+        });
+
+        await ctx.reply(
+          `🔒 *របាយការណ៍ Excel ពេញមួយថ្ងៃ ត្រូវបានផ្ញើចូលក្នុងឆាតផ្ទាល់ខ្លួន (Private Chat) របស់លោកគ្រូរួចរាល់ហើយ!*\n_ប្រធានថ្នាក់ក្នុងគ្រុបនេះ មិនអាចមើល ឬទាញយកឯកសារនេះបានទេ។_`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      } catch (dmErr) {
+        console.warn('Could not send DM to teacher:', dmErr.message);
+      }
+    }
+
+    await ctx.replyWithDocument(new InputFile(filePath, filename), {
+      caption,
+      parse_mode: 'Markdown'
+    });
+  } catch (err) {
+    console.error('Error generating Full Day Excel:', err);
+    await ctx.reply(`❌ បរាជ័យក្នុងការបង្កើតរបាយការណ៍: ${err.message}`);
+  }
+}
+
+// Helper: Parse user date input in DD-MM-YYYY, DD/MM/YYYY, or YYYY-MM-DD
+function parseUserDateInput(input) {
+  if (!input) return null;
+  const str = input.trim().toLowerCase();
+  const now = dayjs();
+
+  if (/^(yesterday|ម្សិលមិញ)$/.test(str)) {
+    return now.subtract(1, 'day').format('YYYY-MM-DD');
+  }
+  if (/^(today|ថ្ងៃនេះ)$/.test(str)) {
+    return now.format('YYYY-MM-DD');
+  }
+
+  // DD-MM-YYYY or DD/MM/YYYY (e.g. 01-10-2026, 31/10/2026)
+  const ddmmyyyy = str.match(/^(\d{1,2})[\-\/\.](\d{1,2})[\-\/\.](\d{4})$/);
+  if (ddmmyyyy) {
+    const day = ddmmyyyy[1].padStart(2, '0');
+    const month = ddmmyyyy[2].padStart(2, '0');
+    const year = ddmmyyyy[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD (e.g. 2026-10-01)
+  const yyyymmdd = str.match(/^(\d{4})[\-\/\.](\d{1,2})[\-\/\.](\d{1,2})$/);
+  if (yyyymmdd) {
+    const year = yyyymmdd[1];
+    const month = yyyymmdd[2].padStart(2, '0');
+    const day = yyyymmdd[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  return null;
+}
+
+// Command: /attendance [optional date e.g. 01-10-2026 or yesterday]
+bot.command('attendance', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!*', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const parts = ctx.message.text.trim().split(/\s+/).slice(1);
+  const arg = parts.join(' ');
+
+  if (arg) {
+    const parsedDate = parseUserDateInput(arg);
+    if (parsedDate) {
+      return sendFullDayReport(ctx, parsedDate);
+    } else {
+      await ctx.reply(
+        `⚠️ *ទម្រង់កាលបរិច្ឆេទមិនត្រឹមត្រូវ!*\n` +
+        `សូមវាយតាមទម្រង់: \`DD-MM-YYYY\` (ឧ. \`/attendance 01-10-2026\`) ឬ \`yesterday\`\n` +
+        `Bot នឹងបើកផ្ទាំងជ្រើសរើសថ្ងៃជូនលោកគ្រូស្វ័យប្រវត្តិ៖`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+  }
+
+  // Default: Open interactive date picker!
+  await promptChooseReportDate(ctx);
+});
+
+// Callbacks for report
+bot.callbackQuery('cmd_attendance', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.answerCallbackQuery({
+      text: '⚠️ សិទ្ធិទាញយករបាយការណ៍ សម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!',
+      show_alert: true
+    });
+  }
+  await ctx.answerCallbackQuery();
+  await promptChooseReportDate(ctx);
+});
+
+bot.callbackQuery(/^get_fullday_(.+)$/, async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.answerCallbackQuery({
+      text: '⚠️ សិទ្ធិទាញយករបាយការណ៍ សម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!',
+      show_alert: true
+    });
+  }
+  await ctx.answerCallbackQuery();
+  const dateStr = ctx.match[1];
+  await sendFullDayReport(ctx, dateStr);
+});
+
+bot.callbackQuery('list_past_report_days', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const now = dayjs();
+  const keyboard = new InlineKeyboard();
+  for (let i = 1; i <= 6; i++) {
+    const pastD = now.subtract(i, 'day');
+    const pStr = pastD.format('YYYY-MM-DD');
+    const pDayName = DAYS[pastD.day()];
+    const pKhmer = KHMER_DAYS[pDayName];
+    if (pastD.day() !== 0) { // skip Sunday
+      keyboard.text(`📅 ថ្ងៃ${pKhmer} (${pastD.format('DD/MM/YYYY')})`, `get_fullday_${pStr}`).row();
+    }
+  }
+  keyboard.text('🔙 ថយក្រោយ (Back)', 'cmd_attendance');
+  await ctx.editMessageText('📅 *សូមជ្រើសរើសថ្ងៃដែលចង់ទាញយករបាយការណ៍:*', {
+    parse_mode: 'Markdown',
+    reply_markup: keyboard
+  });
+});
+
+// --- MONTHLY & CUSTOM DATE RANGE REPORT FUNCTIONS ---
+
+async function sendRangeReport(ctx, startDateStr, endDateStr, customTitle = null, customFileName = null) {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!*', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const rangeData = getRangeAttendanceStatus(startDateStr, endDateStr, { DAYS, KHMER_DAYS, getTodaySlots });
+
+  if (rangeData.totalSchoolDays === 0) {
+    return ctx.reply(
+      `⚠️ *មិនមានកាលវិភាគសិក្សាក្នុងចន្លោះកាលបរិច្ឆេទនេះទេ!* (${dayjs(startDateStr).format('DD/MM/YYYY')} ដល់ ${dayjs(endDateStr).format('DD/MM/YYYY')})`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  try {
+    await ctx.replyWithChatAction?.('upload_document');
+    const { filePath, filename } = await generateRangeExcelReport({
+      ...rangeData,
+      customTitle,
+      customFileName
+    });
+
+    let totalClassA = 0;
+    let totalClassP = 0;
+    let totalClassL = 0;
+    rangeData.studentSummaries.forEach(st => {
+      totalClassA += st.absent;
+      totalClassP += st.permission;
+      totalClassL += st.late;
+    });
+
+    const displayTitle = customTitle || 'របាយការណ៍វត្តមានសិស្សសរុប (Monthly Report)';
+    const caption =
+`📊 *${displayTitle}*
+🏫 *ថ្នាក់:* ${CLASS_NAME}
+📁 *ឈ្មោះឯកសារ:* \`${filename}\`
+📅 *ចន្លោះកាលបរិច្ឆេទ:* ពី \`${dayjs(startDateStr).format('DD/MM/YYYY')}\` ដល់ \`${dayjs(endDateStr).format('DD/MM/YYYY')}\`
+👨‍🏫 *គ្រូបន្ទុកថ្នាក់:* ${TEACHER_NAME}
+
+📈 *ស្ថិតិសរុបទូទាំងថ្នាក់:*
+• 🏫 ថ្ងៃរៀនសរុប: *${rangeData.totalSchoolDays} ថ្ងៃ*
+• ⏰ ម៉ោងបង្រៀនសរុប: *${rangeData.totalScheduledSessions} ម៉ោង* (កត់ត្រាបាន ${rangeData.totalRecordedSessions}, ភ្លេច ${rangeData.totalMissedSessions})
+• 👥 សិស្សសរុប: *${rangeData.studentSummaries.length} នាក់*
+• ❌ អវត្តមានសរុប (A): *${totalClassA} លើក*
+• 📝 ច្បាប់សរុប (P): *${totalClassP} លើក*
+• ⏳ យឺតសរុប (L): *${totalClassL} លើក*
+
+📁 *ឯកសារ Excel មាន ៣ សន្លឹកកិច្ចការ:*
+1️⃣ សង្ខេបប្រចាំខែ និងការវាយតម្លៃវិន័យសិស្សម្នាក់ៗ
+2️⃣ តារាងវត្តមានតាមថ្ងៃពេញមួយខែ (Daily Attendance Grid)
+3️⃣ ស្ថិតិវត្តមានតាមមុខវិជ្ជានីមួយៗ`;
+
+    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+    const teacherId = getTeacherId();
+
+    if (isGroup && teacherId) {
+      try {
+        await bot.api.sendDocument(teacherId, new InputFile(filePath, filename), {
+          caption: `🔒 *[ផ្ញើដោយសម្ងាត់ពីគ្រុប]*\n\n` + caption,
+          parse_mode: 'Markdown'
+        });
+
+        await ctx.reply(
+          `🔒 *របាយការណ៍ប្រចាំខែ Excel ត្រូវបានផ្ញើចូលក្នុងឆាតផ្ទាល់ខ្លួន (Private Chat) របស់លោកគ្រូរួចរាល់ហើយ!*\n_ប្រធានថ្នាក់ក្នុងគ្រុបនេះ មិនអាចមើល ឬទាញយកឯកសារនេះបានទេ។_`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      } catch (dmErr) {
+        console.warn('Could not send DM to teacher:', dmErr.message);
+      }
+    }
+
+    await ctx.replyWithDocument(new InputFile(filePath, filename), {
+      caption,
+      parse_mode: 'Markdown'
+    });
+  } catch (err) {
+    console.error('Error generating Range Excel:', err);
+    await ctx.reply(`❌ បរាជ័យក្នុងការបង្កើតរបាយការណ៍ប្រចាំខែ: ${err.message}`);
+  }
+}
+
+// Prompt teacher to rename file when selecting date-to-date
+async function promptRangeRename(ctx, startDateStr, endDateStr) {
+  pendingRangeRename.set(ctx.from.id, { startDateStr, endDateStr });
+  const startFmt = dayjs(startDateStr).format('DD-MM-YYYY');
+  const endFmt = dayjs(endDateStr).format('DD-MM-YYYY');
+
+  const keyboard = new InlineKeyboard()
+    .text('⚡ ប្រើឈ្មោះស្វ័យប្រវត្តិ (Skip)', 'range_skip_rename')
+    .row()
+    .text('❌ បោះបង់ (Cancel)', 'range_cancel_rename');
+
+  await ctx.reply(
+    `📅 *បានកំណត់ចន្លោះថ្ងៃ:* ពី \`${startFmt}\` ដល់ \`${endFmt}\`\n\n` +
+    `✍️ *សូមវាយ "ឈ្មោះឯកសារ" ឬ "ចំណងជើងរបាយការណ៍" ដែលលោកគ្រូចង់ដាក់:*\n` +
+    `_(ឧទាហរណ៍: \`របាយការណ៍ពាក់កណ្តាលខែ១០_១១\` ឬ \`វត្តមាន_ខែវិច្ឆិកា_2026\`)_\n\n` +
+    `👉 ឬចុចប៊ូតុង *[ប្រើឈ្មោះស្វ័យប្រវត្តិ]* ប្រសិនបើចង់ប្រើឈ្មោះស្វ័យប្រវត្តិតាមកាលបរិច្ឆេទ។`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+}
+
+async function promptMonthlyReport(ctx) {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!*', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const now = dayjs();
+  const thisMonthStart = now.startOf('month').format('YYYY-MM-DD');
+  const thisMonthEnd = now.endOf('month').format('YYYY-MM-DD');
+  const thisMonthLabel = `ខែនេះ (ខែ ${now.format('MM/YYYY')})`;
+
+  const lastMonth = now.subtract(1, 'month');
+  const lastMonthStart = lastMonth.startOf('month').format('YYYY-MM-DD');
+  const lastMonthEnd = lastMonth.endOf('month').format('YYYY-MM-DD');
+  const lastMonthLabel = `ខែមុន (ខែ ${lastMonth.format('MM/YYYY')})`;
+
+  const keyboard = new InlineKeyboard()
+    .text(`📆 ${thisMonthLabel}`, `get_range_${thisMonthStart}_${thisMonthEnd}`)
+    .row()
+    .text(`📆 ${lastMonthLabel}`, `get_range_${lastMonthStart}_${lastMonthEnd}`)
+    .row()
+    .text('📅 កំណត់ចន្លោះថ្ងៃដោយខ្លួនឯង (Custom Range)', 'prompt_custom_range')
+    .row()
+    .text('❌ បោះបង់', 'rec_cancel');
+
+  const text =
+`📆 *របាយការណ៍វត្តមានសង្ខេបប្រចាំខែ (Monthly Report)*
+
+👉 សូមជ្រើសរើសខែដែលលោកគ្រូចង់ទាញយករបាយការណ៍ Excel ខាងក្រោម៖
+_(ឬវាយបញ្ជាកំណត់ថ្ងៃដោយខ្លួនឯង: \`/range 01-10-2026 to 31-10-2026\`)_`;
+
+  if (ctx.callbackQuery) {
+    return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+  }
+  return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+// Command: /monthly
+bot.command('monthly', promptMonthlyReport);
+bot.command('month', promptMonthlyReport);
+
+// Command: /range <start> to <end> [custom name]
+bot.command('range', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!*', {
+      parse_mode: 'Markdown'
+    });
+  }
+
+  const text = ctx.message.text.trim();
+  // Match: /range DD-MM-YYYY to DD-MM-YYYY [custom name]
+  const match = text.match(/^\/range\s+(\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{4})\s*(?:to|\-|ដល់)\s*(\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{4})(?:\s+(.+))?$/i);
+
+  if (!match) {
+    return ctx.reply(
+      `❌ *ទម្រង់មិនត្រឹមត្រូវ!*\n` +
+      `របៀបប្រើ: \`/range <ថ្ងៃចាប់ផ្តើម> to <ថ្ងៃបញ្ចប់> [ឈ្មោះឯកសារ]\`\n` +
+      `*ឧទាហរណ៍:*\n` +
+      `• \`/range 15-10-2026 to 14-11-2026\`\n` +
+      `• \`/range 15-10-2026 to 14-11-2026 របាយការណ៍ខែវិច្ឆិកា\``,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const startParsed = parseUserDateInput(match[1]);
+  const endParsed = parseUserDateInput(match[2]);
+  const customName = match[3] ? match[3].trim() : null;
+
+  if (!startParsed || !endParsed) {
+    return ctx.reply(
+      `❌ *ថ្ងៃខែមិនត្រឹមត្រូវ!*\nសូមវាយតាមទម្រង់: \`DD-MM-YYYY\` (ឧ. \`/range 15-10-2026 to 14-11-2026\`)`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (dayjs(startParsed).isAfter(dayjs(endParsed))) {
+    return ctx.reply('❌ ថ្ងៃចាប់ផ្តើមមិនអាចនៅក្រោយថ្ងៃបញ្ចប់បានទេ!', { parse_mode: 'Markdown' });
+  }
+
+  if (customName) {
+    return sendRangeReport(ctx, startParsed, endParsed, customName, customName);
+  }
+
+  await promptRangeRename(ctx, startParsed, endParsed);
+});
+
+// Callbacks for monthly / range
+bot.callbackQuery('cmd_monthly', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.answerCallbackQuery({
+      text: '⚠️ សិទ្ធិទាញយករបាយការណ៍ សម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!',
+      show_alert: true
+    });
+  }
+  await ctx.answerCallbackQuery();
+  await promptMonthlyReport(ctx);
+});
+
+bot.callbackQuery(/^get_range_([^_]+)_(.+)$/, async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.answerCallbackQuery({
+      text: '⚠️ សិទ្ធិទាញយករបាយការណ៍ សម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!',
+      show_alert: true
+    });
+  }
+  await ctx.answerCallbackQuery();
+  const startStr = ctx.match[1];
+  const endStr = ctx.match[2];
+  const monthTitle = `របាយការណ៍វត្តមានសិស្សប្រចាំខែ ${dayjs(startStr).format('MM/YYYY')}`;
+  const monthFileName = `Attendance_Report_Month_${dayjs(startStr).format('MM_YYYY')}.xlsx`;
+  await sendRangeReport(ctx, startStr, endStr, monthTitle, monthFileName);
+});
+
+bot.callbackQuery('range_skip_rename', async (ctx) => {
+  if (!checkIsTeacher(ctx)) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  const pending = pendingRangeRename.get(ctx.from.id);
+  if (!pending) {
+    return ctx.reply('⚠️ មិនមានប្រតិបត្តិការកំណត់ឈ្មោះដែលកំពុងរង់ចាំទេ។');
+  }
+  pendingRangeRename.delete(ctx.from.id);
+  await sendRangeReport(ctx, pending.startDateStr, pending.endDateStr, null, null);
+});
+
+bot.callbackQuery('range_cancel_rename', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  pendingRangeRename.delete(ctx.from.id);
+  await ctx.editMessageText('❌ បានបោះបង់ការទាញយករបាយការណ៍។');
+});
+
+bot.callbackQuery('prompt_custom_range', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.reply(
+    `📅 *របៀបទាញយករបាយការណ៍តាមចន្លោះថ្ងៃ (Custom Date to Date):*\n\n` +
+    `លោកគ្រូអាចវាយកាលបរិច្ឆេទ ពីថ្ងៃណា ដល់ថ្ងៃណា ឧទាហរណ៍៖\n` +
+    `• \`15-10-2026 to 14-11-2026\`\n` +
+    `• \`/range 15-10-2026 to 14-11-2026\`\n` +
+    `• \`/range 15-10-2026 to 14-11-2026 របាយការណ៍ខែវិច្ឆិកា\`\n\n` +
+    `💡 _បន្ទាប់ពីវាយចន្លោះថ្ងៃ Bot នឹងសួររក "ឈ្មោះឯកសារ" ដែលលោកគ្រូចង់ដាក់ភ្លាមៗ!_`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+bot.callbackQuery('cmd_today', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const now = dayjs();
+  const dayName = DAYS[now.day()];
+  const khmerDay = KHMER_DAYS[dayName];
+  const slots = getTodaySlots(now);
+  let text = `📅 *កាលវិភាគថ្ងៃ${khmerDay} (${dayName}):*\n\n`;
+  if (slots.length === 0) text += 'មិនមានម៉ោងសិក្សាទេ។';
+  else {
+    slots.forEach(s => text += `⏰ \`${s.start} - ${s.end}\`: *${s.subject}*\n`);
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+bot.callbackQuery('cmd_students', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const students = getStudents();
+  let text = `👥 *បញ្ជីឈ្មោះសិស្ស (${students.length} នាក់):*\n`;
+  students.forEach((s) => {
+    text += `${s.id}. ${s.name} (${s.gender})\n`;
+  });
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+bot.callbackQuery(/^get_report_(.+)$/, async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.answerCallbackQuery({
+      text: '⚠️ សិទ្ធិទាញយករបាយការណ៍ សម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!',
+      show_alert: true
+    });
+  }
+  await ctx.answerCallbackQuery();
+  const subject = ctx.match[1];
+  await sendAttendanceReport(ctx, subject);
+});
+
+// Message listener for attendance or keywords
+bot.on('message:text', async (ctx, next) => {
+  const text = ctx.message.text.trim();
+
+  // Handle pending range rename for teacher
+  if (pendingRangeRename.has(ctx.from.id)) {
+    const pending = pendingRangeRename.get(ctx.from.id);
+    if (/^\/(cancel|exit|stop)$/i.test(text) || text === 'បោះបង់') {
+      pendingRangeRename.delete(ctx.from.id);
+      return ctx.reply('❌ បានបោះបង់ការទាញយករបាយការណ៍។');
+    }
+    if (/^\/(skip|default)$/i.test(text) || /^(skip|រំលង|ធម្មតា)$/i.test(text)) {
+      pendingRangeRename.delete(ctx.from.id);
+      return sendRangeReport(ctx, pending.startDateStr, pending.endDateStr, null, null);
+    }
+    pendingRangeRename.delete(ctx.from.id);
+    return sendRangeReport(ctx, pending.startDateStr, pending.endDateStr, text, text);
+  }
+
+  // Cancel command for active session
+  if (/^\/(cancel|exit|stop)$/i.test(text) || text === 'បោះបង់') {
+    if (pendingSessions.has(ctx.from.id)) {
+      pendingSessions.delete(ctx.from.id);
+      return ctx.reply('❌ បានបោះបង់ការកត់ត្រាវត្តមាន។');
+    }
+  }
+
+  // Keyword check: attendance / report / វត្តមាន [optional date]
+  const matchAtt = text.match(/^(?:attendance|report|វត្តមាន|\/attendance|\/report|\/វត្តមាន)(?:\s+(.+))?$/i);
+  if (matchAtt) {
+    const rawArg = matchAtt[1];
+    if (rawArg) {
+      const parsedDate = parseUserDateInput(rawArg);
+      if (parsedDate) {
+        return sendFullDayReport(ctx, parsedDate);
+      }
+    }
+    return promptChooseReportDate(ctx);
+  }
+
+  // Monthly keyword check
+  if (/^(monthly|\/monthly|របាយការណ៍ខែ|ខែនេះ|ខែមុន)$/i.test(text)) {
+    return promptMonthlyReport(ctx);
+  }
+
+  // Cross-month or custom date range matching: e.g. "15-10-2026 to 14-11-2026" or "15-10-2026 to 14-11-2026 របាយការណ៍ខែវិច្ឆិកា"
+  const rangeMatch = text.match(/^(?:\/range\s+|range\s+)?(\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{4})\s*(?:to|\-|ដល់)\s*(\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{4})(?:\s+(.+))?$/i);
+  if (rangeMatch) {
+    if (!checkIsTeacher(ctx)) {
+      return ctx.reply('⚠️ *សិទ្ធិទាញយករបាយការណ៍វត្តមាន គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!*', {
+        parse_mode: 'Markdown'
+      });
+    }
+    const startParsed = parseUserDateInput(rangeMatch[1]);
+    const endParsed = parseUserDateInput(rangeMatch[2]);
+    const customName = rangeMatch[3] ? rangeMatch[3].trim() : null;
+
+    if (startParsed && endParsed) {
+      if (dayjs(startParsed).isAfter(dayjs(endParsed))) {
+        return ctx.reply('❌ ថ្ងៃចាប់ផ្តើមមិនអាចនៅក្រោយថ្ងៃបញ្ចប់បានទេ!', { parse_mode: 'Markdown' });
+      }
+      if (customName) {
+        return sendRangeReport(ctx, startParsed, endParsed, customName, customName);
+      }
+      return promptRangeRename(ctx, startParsed, endParsed);
+    }
+  }
+
+  // Check if sender has an active session from interactive button selection
+  const session = pendingSessions.get(ctx.from.id);
+
+  // Parse attendance input: Name P / Name A / Name L
+  const { parsedItems } = parseAttendanceInput(text);
+
+  if (parsedItems.length > 0) {
+    const now = dayjs();
+    let dateStr, subject, timeSlot;
+
+    if (session) {
+      // Use chosen date, time slot, and subject from interactive button session!
+      dateStr = session.dateStr;
+      subject = session.subject;
+      timeSlot = session.timeSlot;
+      pendingSessions.delete(ctx.from.id); // Clear session
+    } else {
+      // Direct message fallback: Auto-detect from real-time timetable
+      const currentSlot = getCurrentSlot(now);
+      dateStr = now.format('YYYY-MM-DD');
+      subject = currentSlot ? currentSlot.subject : 'មុខវិជ្ជាទូទៅ';
+      timeSlot = currentSlot ? `${currentSlot.start} - ${currentSlot.end}` : now.format('HH:mm');
+    }
+
+    const recordedBy = ctx.from?.first_name || 'ប្រធានថ្នាក់';
+
+    const result = recordAttendance({
+      dateStr,
+      subject,
+      timeSlot,
+      recordedBy,
+      parsedItems
+    });
+
+    const sum = result.summary;
+    let replyMsg =
+`✅ *បានកត់ត្រាវត្តមានដោយជោគជ័យ!*
+🏫 *ថ្នាក់:* ${CLASS_NAME}
+📚 *មុខវិជ្ជា:* ${subject} (\`${timeSlot}\`)
+📅 *កាលបរិច្ឆេទ:* ${dayjs(dateStr).format('dddd, DD MMMM YYYY')}
+👤 *អ្នកកត់ត្រា:* ${recordedBy}
+
+📊 *ស្ថិតិវត្តមាន:*
+• 👥 សិស្សសរុប: *${sum.total} នាក់*
+• ✅ មានវត្តមាន: *${sum.present} នាក់*
+• ❌ អវត្តមាន (A): *${sum.absent} នាក់*
+• 📝 ច្បាប់ (P): *${sum.permission} នាក់*
+• ⏳ មកយឺត (L): *${sum.late} នាក់*`;
+
+    if (result.notFoundNames.length > 0) {
+      replyMsg += `\n\n⚠️ *រកមិនឃើញឈ្មោះខាងក្រោមក្នុងបញ្ជី:*
+${result.notFoundNames.map(n => `• _${n}_`).join('\n')}`;
+    }
+
+    let keyboard = undefined;
+    if (checkIsTeacher(ctx)) {
+      keyboard = new InlineKeyboard().text('📥 ទាញយករបាយការណ៍ (Excel)', `get_report_${subject}`);
+    }
+
+    await ctx.reply(replyMsg, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+    return;
+  }
+
+  // If in active session but message didn't contain attendance format
+  if (session) {
+    return ctx.reply(
+      `⚠️ *ទម្រង់មិនត្រឹមត្រូវ!*\n` +
+      `សូមវាយឈ្មោះ ឬលេខរៀងសិស្សជាមួយ \`A\` (អវត្តមាន), \`P\` (ច្បាប់), ឬ \`L\` (យឺត)។\n\n` +
+      `*ឧទាហរណ៍:*\n` +
+      `\`ឆោម ចិន A\`\n` +
+      `\`06 L\`\n` +
+      `\`ខា សិនហួ P (ឈឺ)\`\n\n` +
+      `_(វាយ \`/cancel\` ដើម្បីបោះបង់)_`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  await next();
+});
+
+bot.catch((err) => {
+  console.error('Error in bot operation:', err);
+});
+
+module.exports = bot;
+
+if (!process.env.VERCEL) {
+  console.log('🤖 Starting PineApple Attendance Bot...');
+  bot.start({
+    onStart: (botInfo) => {
+      console.log(`✅ Bot @${botInfo.username} is running with Interactive Button Attendance Flow!`);
+    }
+  });
+}

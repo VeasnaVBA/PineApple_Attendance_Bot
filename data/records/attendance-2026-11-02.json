@@ -1,0 +1,319 @@
+{
+  "ប្រវត្តិវិទ្យា (H2)": {
+    "date": "2026-11-02",
+    "subject": "ប្រវត្តិវិទ្យា (H2)",
+    "timeSlot": "07:00 - 08:00",
+    "recordedBy": "សក់",
+    "createdAt": "2026-11-01T08:01:29.097Z",
+    "records": [
+      {
+        "no": 1,
+        "id": "01",
+        "name": "ខា សិនហួ",
+        "gender": "ប្រុស",
+        "dob": "02/01/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 2,
+        "id": "02",
+        "name": "ខេង គឹមឡាង",
+        "gender": "ស្រី",
+        "dob": "07/01/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 3,
+        "id": "03",
+        "name": "ចំណាន លីនតុន",
+        "gender": "ប្រុស",
+        "dob": "11/05/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 4,
+        "id": "04",
+        "name": "ឆោម ចិន",
+        "gender": "ស្រី",
+        "dob": "25/06/2010",
+        "status": "Absent",
+        "code": "A",
+        "note": ""
+      },
+      {
+        "no": 5,
+        "id": "05",
+        "name": "ជួប តុនកែវ",
+        "gender": "ស្រី",
+        "dob": "27/06/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 6,
+        "id": "06",
+        "name": "ឌៀម រតនវិសាល",
+        "gender": "ប្រុស",
+        "dob": "06/10/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 7,
+        "id": "07",
+        "name": "ទេពមិន មុនីន",
+        "gender": "ប្រុស",
+        "dob": "07/01/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 8,
+        "id": "08",
+        "name": "បូរី រស្មី",
+        "gender": "ប្រុស",
+        "dob": "29/05/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 9,
+        "id": "09",
+        "name": "ផល្លា សូភីដានី",
+        "gender": "ស្រី",
+        "dob": "13/01/2013",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 10,
+        "id": "10",
+        "name": "ផាត សុផាន់ណា",
+        "gender": "ស្រី",
+        "dob": "21/01/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 11,
+        "id": "11",
+        "name": "ផោន សុភ័ក្ត្រវឌ្ឍនា",
+        "gender": "ស្រី",
+        "dob": "18/10/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 12,
+        "id": "12",
+        "name": "ភាន សុបញ្ញា",
+        "gender": "ស្រី",
+        "dob": "02/08/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 13,
+        "id": "13",
+        "name": "យ៉ាំ សុធីម",
+        "gender": "ស្រី",
+        "dob": "18/11/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 14,
+        "id": "14",
+        "name": "យ៉ុក ខិត្តាយ៉ា",
+        "gender": "ស្រី",
+        "dob": "07/11/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 15,
+        "id": "15",
+        "name": "យ៉េត ករុណា",
+        "gender": "ប្រុស",
+        "dob": "27/01/2013",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 16,
+        "id": "16",
+        "name": "យុតពិសិដ្ឋសុគន្ធ សក្ខណា",
+        "gender": "ស្រី",
+        "dob": "28/01/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 17,
+        "id": "17",
+        "name": "រិន រតនា",
+        "gender": "ស្រី",
+        "dob": "29/06/2010",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 18,
+        "id": "18",
+        "name": "រីម សុភ័ក្ត្រា",
+        "gender": "ស្រី",
+        "dob": "09/04/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 19,
+        "id": "19",
+        "name": "លាង ហ៊ីយឡាង",
+        "gender": "ស្រី",
+        "dob": "03/04/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 20,
+        "id": "20",
+        "name": "ស្រ៊ិន ពៅម៉ូនីកា",
+        "gender": "ស្រី",
+        "dob": "11/01/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 21,
+        "id": "21",
+        "name": "សាន្ត សុខហែម",
+        "gender": "ស្រី",
+        "dob": "18/11/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 22,
+        "id": "22",
+        "name": "សុជាតិ ហាណា",
+        "gender": "ស្រី",
+        "dob": "31/01/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 23,
+        "id": "23",
+        "name": "សុក័ក្ត្រ ដាវីយ៉ា",
+        "gender": "ស្រី",
+        "dob": "14/09/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 24,
+        "id": "24",
+        "name": "សួស្តី ឧស្សាហ៍",
+        "gender": "ប្រុស",
+        "dob": "06/02/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 25,
+        "id": "25",
+        "name": "សៀង ចរិយា",
+        "gender": "ស្រី",
+        "dob": "13/04/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 26,
+        "id": "26",
+        "name": "ហិន ដាលីស",
+        "gender": "ស្រី",
+        "dob": "04/12/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 27,
+        "id": "27",
+        "name": "ហុង សុខជាង",
+        "gender": "ប្រុស",
+        "dob": "22/07/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 28,
+        "id": "28",
+        "name": "ហេង ធាក់ទិន",
+        "gender": "ប្រុស",
+        "dob": "27/02/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 29,
+        "id": "29",
+        "name": "ហេង ប៊ុនលាភ",
+        "gender": "ប្រុស",
+        "dob": "07/03/2011",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      },
+      {
+        "no": 30,
+        "id": "30",
+        "name": "ឡាយ សុខហេង",
+        "gender": "ប្រុស",
+        "dob": "24/03/2012",
+        "status": "Present",
+        "code": "✓",
+        "note": ""
+      }
+    ],
+    "updatedAt": "2026-11-01T08:01:29.097Z",
+    "summary": {
+      "total": 30,
+      "present": 29,
+      "absent": 1,
+      "permission": 0,
+      "late": 0
+    }
+  }
+}
