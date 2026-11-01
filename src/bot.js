@@ -1461,7 +1461,7 @@ bot.catch((err) => {
 
 module.exports = bot;
 
-if (!process.env.VERCEL) {
+if (!process.env.VERCEL && require.main === module && process.env.POLLING === 'true') {
   console.log('🤖 Starting PineApple Attendance Bot...');
   bot.start({
     onStart: (botInfo) => {
@@ -1469,3 +1469,4 @@ if (!process.env.VERCEL) {
     }
   });
 }
+
