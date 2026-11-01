@@ -2,13 +2,24 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+const os = require('os');
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const RECORDS_DIR = path.join(DATA_DIR, 'records');
-const TEMP_DIR = path.join(__dirname, '..', 'temp');
+const TEMP_DIR = isServerless ? path.join(os.tmpdir(), 'temp') : path.join(__dirname, '..', 'temp');
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(RECORDS_DIR)) fs.mkdirSync(RECORDS_DIR, { recursive: true });
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch (e) {}
+
+try {
+  if (!fs.existsSync(RECORDS_DIR)) fs.mkdirSync(RECORDS_DIR, { recursive: true });
+} catch (e) {}
+
+try {
+  if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+} catch (e) {}
 
 function readJson(filename, defaultVal = []) {
   const filePath = path.join(DATA_DIR, filename);
@@ -18,14 +29,18 @@ function readJson(filename, defaultVal = []) {
       return JSON.parse(data);
     }
   } catch (err) {
-    console.error(`Error reading ${filename}:`, err);
+    console.warn(`Error reading ${filename}:`, err.message);
   }
   return defaultVal;
 }
 
 function writeJson(filename, data) {
-  const filePath = path.join(DATA_DIR, filename);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  try {
+    const filePath = path.join(DATA_DIR, filename);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.warn(`[config] Note: Could not write ${filename} locally (Serverless read-only mode):`, err.message);
+  }
 }
 
 function getSettings() {

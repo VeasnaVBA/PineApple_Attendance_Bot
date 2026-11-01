@@ -191,8 +191,12 @@ function getDailyRecords(dateStr) {
 }
 
 function saveDailyRecords(dateStr, records) {
-  const filePath = getRecordFilePath(dateStr);
-  fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
+  try {
+    const filePath = getRecordFilePath(dateStr);
+    fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
+  } catch (err) {
+    console.warn(`[attendance] Note: Could not write daily records to local disk:`, err.message);
+  }
 }
 
 /**
