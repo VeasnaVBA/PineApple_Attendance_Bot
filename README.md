@@ -66,7 +66,7 @@
 1. ចូលទៅកាន់ [Vercel Dashboard](https://vercel.com)
 2. ចុច **Add New...** -> **Project** -> ជ្រើសរើស Repository **`PineApple_Attendance_Bot`**
 3. ត្រង់កន្លែង **Environment Variables** បន្ថែមអថេរខាងក្រោម៖
-   - `BOT_TOKEN` = `9161193056:AAE3cPKgTIk6qeysCU5KPiKtpLvjCezdKak`
+   - `BOT_TOKEN` = `<BOT_TOKEN_ដែលបានមកពី_BotFather>`
    - `TEACHER_NAME` = `សក់ វាសនា`
    - `CLASS_NAME` = `វិទ្យាល័យ នេត យ៉ង់ - ថ្នាក់ទី 10D`
    - `TIMEZONE` = `Asia/Phnom_Penh`
