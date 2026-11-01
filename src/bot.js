@@ -966,45 +966,16 @@ async function promptChooseReportDate(ctx) {
 
   const now = dayjs();
   const dayName = DAYS[now.day()];
-  const isSunday = now.day() === 0;
+  const todayStr = now.format('YYYY-MM-DD');
+  const todayKhmer = KHMER_DAYS[dayName] || 'អាទិត្យ';
 
   const yesterday = now.subtract(1, 'day');
   const yesterdayStr = yesterday.format('YYYY-MM-DD');
   const yesterdayDayName = DAYS[yesterday.day()];
-  const yesterdayKhmer = KHMER_DAYS[yesterdayDayName];
+  const yesterdayKhmer = KHMER_DAYS[yesterdayDayName] || 'សៅរ៍';
 
-  const keyboard = new InlineKeyboard();
-
-  if (isSunday) {
-    // Sunday has no timetable! Offer past school days (Saturday, Friday, etc.)
-    for (let i = 1; i <= 6; i++) {
-      const pastD = now.subtract(i, 'day');
-      const pStr = pastD.format('YYYY-MM-DD');
-      const pDayName = DAYS[pastD.day()];
-      const pKhmer = KHMER_DAYS[pDayName];
-      const label = i === 1
-        ? `📅 ថ្ងៃ${pKhmer} (ម្សិលមិញ - ${pastD.format('DD/MM')})`
-        : `📅 ថ្ងៃ${pKhmer} (${pastD.format('DD/MM')})`;
-      keyboard.text(label, `get_fullday_${pStr}`).row();
-    }
-
-    const text =
-`📅 *ថ្ងៃនេះជាថ្ងៃអាទិត្យ (Sunday) មិនមានកាលវិភាគសិក្សាទេ!*
-
-👉 សូមជ្រើសរើសថ្ងៃដែលលោកគ្រូចង់ទាញយក **របាយការណ៍ពេញមួយថ្ងៃ (Full Day Report)** ខាងក្រោម៖`;
-
-    if (ctx.callbackQuery) {
-      return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-    }
-    return ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-  }
-
-  // Weekday (Monday to Saturday)
-  const todayStr = now.format('YYYY-MM-DD');
-  const todayKhmer = KHMER_DAYS[dayName];
-
-  keyboard
-    .text(`📅 របាយការណ៍ថ្ងៃនេះពេញមួយថ្ងៃ (${todayKhmer}, ${now.format('DD/MM')})`, `get_fullday_${todayStr}`)
+  const keyboard = new InlineKeyboard()
+    .text(`📅 របាយការណ៍ថ្ងៃនេះ (${todayKhmer}, ${now.format('DD/MM')})`, `get_fullday_${todayStr}`)
     .row()
     .text(`📅 របាយការណ៍ម្សិលមិញ (${yesterdayKhmer}, ${yesterday.format('DD/MM')})`, `get_fullday_${yesterdayStr}`)
     .row()
@@ -1012,7 +983,7 @@ async function promptChooseReportDate(ctx) {
 
   const text =
 `📊 *ជ្រើសរើសរបាយការណ៍វត្តមានពេញមួយថ្ងៃ (Full Day Report):*
-👉 សូមជ្រើសរើសកាលបរិច្ឆេទដែលចង់ទាញយកឯកសារ Excel ខាងក្រោម៖`;
+👉 សូមជ្រើសរើសកាលបរិច្ឆេទដែលលោកគ្រូចង់ទាញយកឯកសារ Excel ខាងក្រោម៖`;
 
   if (ctx.callbackQuery) {
     return ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
@@ -1481,8 +1452,8 @@ bot.callbackQuery(/^get_report_(.+)$/, async (ctx) => {
     });
   }
   await ctx.answerCallbackQuery();
-  const subject = ctx.match[1];
-  await sendAttendanceReport(ctx, subject);
+  const todayStr = dayjs().format('YYYY-MM-DD');
+  await sendFullDayReport(ctx, todayStr);
 });
 
 // Message listener for attendance or keywords
@@ -1616,7 +1587,7 @@ ${result.notFoundNames.map(n => `• _${n}_`).join('\n')}`;
 
     let keyboard = undefined;
     if (checkIsTeacher(ctx)) {
-      keyboard = new InlineKeyboard().text('📥 ទាញយករបាយការណ៍ (Excel)', `get_report_${subject}`);
+      keyboard = new InlineKeyboard().text('📥 ទាញយករបាយការណ៍ (Excel)', `get_fullday_${dateStr}`);
     }
 
     await ctx.reply(replyMsg, {

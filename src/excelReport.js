@@ -326,7 +326,11 @@ async function generateFullDayExcel(dayStatus) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F0F0F0' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       } else {
-        const stuRec = s.records.find(r => r.id === stu.id);
+        const sId = String(stu.id || '').padStart(2, '0');
+        const stuRec = s.records.find(r => {
+          const rId = String(r.id || '').padStart(2, '0');
+          return (rId && rId === sId) || (r.name && r.name === stu.name);
+        });
         const code = stuRec ? stuRec.code : '✓';
         const status = stuRec ? stuRec.status : 'Present';
 

@@ -187,7 +187,7 @@ function recordAttendanceData(ss, payload) {
   var keptRows = [];
   for (var i = 1; i < data.length; i++) {
     var rowDate = formatDateIso(data[i][0]);
-    var rowTime = String(data[i][1]).trim();
+    var rowTime = formatTimeSlot(data[i][1]);
     var rowSubj = String(data[i][2]).trim();
     if (!(rowDate === dateStr && rowTime === timeSlot && rowSubj === subject)) {
       keptRows.push(data[i]);
@@ -217,6 +217,19 @@ function recordAttendanceData(ss, payload) {
   s.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
 }
 
+function formatTimeSlot(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Asia/Phnom_Penh', 'HH:mm');
+  }
+  var str = String(val).trim();
+  if (str.indexOf('1899') !== -1 || str.indexOf('GMT') !== -1) {
+    var match = str.match(/\b(\d{2}:\d{2})(?::\d{2})?\b/);
+    if (match) return match[1];
+  }
+  return str;
+}
+
 function getAttendanceData(ss, singleDate, startDate, endDate) {
   var s = ss.getSheetByName('Attendance');
   var data = s.getDataRange().getValues();
@@ -236,9 +249,9 @@ function getAttendanceData(ss, singleDate, startDate, endDate) {
     if (match && data[i][1] && data[i][3]) {
       records.push({
         date: rowDate,
-        timeSlot: String(data[i][1]).trim(),
+        timeSlot: formatTimeSlot(data[i][1]),
         subject: String(data[i][2]).trim(),
-        id: String(data[i][3]),
+        id: String(data[i][3]).padStart(2, '0'),
         name: String(data[i][4]),
         status: String(data[i][5]),
         code: String(data[i][6]),

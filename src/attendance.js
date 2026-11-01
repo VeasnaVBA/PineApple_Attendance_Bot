@@ -215,6 +215,16 @@ function saveDailyRecords(dateStr, records) {
   }
 }
 
+function cleanTimeSlot(str) {
+  if (!str) return '';
+  const s = String(str).trim();
+  if (s.includes('1899') || s.includes('GMT')) {
+    const m = s.match(/\b(\d{1,2}:\d{2})(?::\d{2})?\b/);
+    if (m) return m[1];
+  }
+  return s;
+}
+
 // Fetch all latest attendance records from Google Sheet and update cache & local files
 async function syncFromGoogleSheet() {
   if (!isGoogleSheetEnabled()) return;
@@ -231,24 +241,25 @@ async function syncFromGoogleSheet() {
       if (!dStr) return;
       if (!dateGroups[dStr]) dateGroups[dStr] = {};
 
-      const slotKey = r.timeSlot ? r.timeSlot.trim() : r.subject;
+      const rawSlot = cleanTimeSlot(r.timeSlot);
+      const slotKey = rawSlot || r.subject;
       if (!dateGroups[dStr][slotKey]) {
         dateGroups[dStr][slotKey] = {
           date: dStr,
           subject: r.subject,
-          timeSlot: r.timeSlot,
+          timeSlot: rawSlot,
           recordedBy: r.recordedBy || 'ប្រធានថ្នាក់',
           records: []
         };
       }
 
       const stuId = String(r.id).padStart(2, '0');
-      const stuInfo = students.find(s => s.id === stuId) || {};
+      const stuInfo = students.find(s => String(s.id).padStart(2, '0') === stuId || s.name === r.name) || {};
 
       dateGroups[dStr][slotKey].records.push({
         no: stuInfo.no || dateGroups[dStr][slotKey].records.length + 1,
         id: stuId,
-        name: r.name,
+        name: stuInfo.name || r.name,
         gender: stuInfo.gender || 'Unknown',
         dob: stuInfo.dob || '',
         status: r.status,
@@ -410,19 +421,41 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
   const students = getStudents();
 
   if (slots.length === 0) {
+    const dailyKeys = Object.keys(daily);
+    const validSessions = [];
+    const seen = new Set();
+
+    dailyKeys.forEach((k) => {
+      const rec = daily[k];
+      if (rec && rec.records && rec.records.length > 0 && !seen.has(rec)) {
+        seen.add(rec);
+        validSessions.push({
+          sessionNo: validSessions.length + 1,
+          timeSlot: cleanTimeSlot(rec.timeSlot) || 'Session',
+          subject: rec.subject || k,
+          code: rec.code || '',
+          isRecorded: true,
+          recordedBy: rec.recordedBy || 'ប្រធានថ្នាក់',
+          summary: rec.summary,
+          records: rec.records || []
+        });
+      }
+    });
+
     return {
       dateStr,
       dayName,
-      khmerDay,
-      hasTimetable: false,
-      scheduledSessions: [],
-      totalSessions: 0,
-      recordedCount: 0,
+      khmerDay: khmerDay || 'អាទិត្យ',
+      hasTimetable: validSessions.length > 0,
+      scheduledSessions: validSessions,
+      totalSessions: validSessions.length,
+      recordedCount: validSessions.length,
       missedCount: 0,
       students
     };
   }
 
+  const matchedRecs = new Set();
   const sessions = slots.map((slot, idx) => {
     const slotTime = `${slot.start} - ${slot.end}`;
     // 1. Strict match by slotTime (e.g. "07:00 - 08:00")
@@ -432,7 +465,8 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
     if (!rec) {
       const foundKey = Object.keys(daily).find(k => {
         const item = daily[k];
-        return item && (item.timeSlot === slotTime || item.timeSlot === `${slot.start} - ${slot.end}`);
+        const itemSlot = cleanTimeSlot(item ? item.timeSlot : '');
+        return item && (itemSlot === slotTime || itemSlot === `${slot.start} - ${slot.end}` || itemSlot === slot.start);
       });
       if (foundKey) rec = daily[foundKey];
     }
@@ -440,12 +474,14 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
     // 3. Fallback match by subject ONLY IF candidate record does not belong to another scheduled slotTime
     if (!rec && daily[slot.subject]) {
       const candidate = daily[slot.subject];
-      if (!candidate.timeSlot || candidate.timeSlot === slotTime || !slots.some(s => `${s.start} - ${s.end}` === candidate.timeSlot)) {
+      const candSlot = cleanTimeSlot(candidate.timeSlot);
+      if (!candSlot || candSlot === slotTime || !slots.some(s => `${s.start} - ${s.end}` === candSlot)) {
         rec = candidate;
       }
     }
 
     if (rec && rec.records && rec.records.length > 0) {
+      matchedRecs.add(rec);
       return {
         sessionNo: idx + 1,
         timeSlot: slotTime,
@@ -468,6 +504,25 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
         summary: null,
         records: []
       };
+    }
+  });
+
+  // Also include any extra sessions recorded in daily that were not matched to scheduled slots
+  const seenExtra = new Set();
+  Object.keys(daily).forEach(k => {
+    const rec = daily[k];
+    if (rec && rec.records && rec.records.length > 0 && !matchedRecs.has(rec) && !seenExtra.has(rec)) {
+      seenExtra.add(rec);
+      sessions.push({
+        sessionNo: sessions.length + 1,
+        timeSlot: cleanTimeSlot(rec.timeSlot) || 'Extra',
+        subject: rec.subject || k,
+        code: rec.code || '',
+        isRecorded: true,
+        recordedBy: rec.recordedBy || 'ប្រធានថ្នាក់',
+        summary: rec.summary,
+        records: rec.records || []
+      });
     }
   });
 
@@ -559,7 +614,8 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
 
       if (session.isRecorded && session.records) {
         session.records.forEach(rec => {
-          const st = studentMap[rec.id];
+          const cleanRecId = String(rec.id || '').padStart(2, '0');
+          const st = studentMap[cleanRecId] || studentMap[rec.id] || Object.values(studentMap).find(s => s.name === rec.name);
           if (st) {
             st.totalSessions++;
             if (rec.status === 'Absent' || rec.code === 'A') {
