@@ -174,15 +174,30 @@ function parseAttendanceInput(text) {
   return { parsedItems, unrecognized };
 }
 
+// In-memory cache for daily records across requests
+const memoryDailyRecords = new Map();
+
+function normalizeDateStr(raw) {
+  if (!raw) return '';
+  const clean = String(raw).replace(/\s*\(.*\)/, '').trim();
+  const d = dayjs(clean);
+  return d.isValid() ? d.format('YYYY-MM-DD') : String(raw).substring(0, 10);
+}
+
 function getRecordFilePath(dateStr) {
   return path.join(RECORDS_DIR, `attendance-${dateStr}.json`);
 }
 
 function getDailyRecords(dateStr) {
+  if (memoryDailyRecords.has(dateStr)) {
+    return memoryDailyRecords.get(dateStr);
+  }
   const filePath = getRecordFilePath(dateStr);
   if (fs.existsSync(filePath)) {
     try {
-      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      memoryDailyRecords.set(dateStr, data);
+      return data;
     } catch (e) {
       console.error(`Error reading ${filePath}`, e);
     }
@@ -191,6 +206,7 @@ function getDailyRecords(dateStr) {
 }
 
 function saveDailyRecords(dateStr, records) {
+  memoryDailyRecords.set(dateStr, records);
   try {
     const filePath = getRecordFilePath(dateStr);
     fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
@@ -199,11 +215,78 @@ function saveDailyRecords(dateStr, records) {
   }
 }
 
+// Fetch all latest attendance records from Google Sheet and update cache & local files
+async function syncFromGoogleSheet() {
+  if (!isGoogleSheetEnabled()) return;
+
+  try {
+    const gs = await callGoogleSheet('getAttendance');
+    if (!gs || !Array.isArray(gs.records) || gs.records.length === 0) return;
+
+    const students = getStudents();
+    const dateGroups = {};
+
+    gs.records.forEach(r => {
+      const dStr = normalizeDateStr(r.date);
+      if (!dStr) return;
+      if (!dateGroups[dStr]) dateGroups[dStr] = {};
+
+      const slotKey = r.timeSlot ? r.timeSlot.trim() : r.subject;
+      if (!dateGroups[dStr][slotKey]) {
+        dateGroups[dStr][slotKey] = {
+          date: dStr,
+          subject: r.subject,
+          timeSlot: r.timeSlot,
+          recordedBy: r.recordedBy || 'ប្រធានថ្នាក់',
+          records: []
+        };
+      }
+
+      const stuId = String(r.id).padStart(2, '0');
+      const stuInfo = students.find(s => s.id === stuId) || {};
+
+      dateGroups[dStr][slotKey].records.push({
+        no: stuInfo.no || dateGroups[dStr][slotKey].records.length + 1,
+        id: stuId,
+        name: r.name,
+        gender: stuInfo.gender || 'Unknown',
+        dob: stuInfo.dob || '',
+        status: r.status,
+        code: r.code,
+        note: r.note || ''
+      });
+    });
+
+    for (const [dStr, sessions] of Object.entries(dateGroups)) {
+      const daily = getDailyRecords(dStr) || {};
+      for (const [slotKey, sess] of Object.entries(sessions)) {
+        const records = sess.records;
+        const summary = {
+          total: records.length,
+          present: records.filter(x => x.status === 'Present').length,
+          absent: records.filter(x => x.status === 'Absent').length,
+          permission: records.filter(x => x.status === 'Permission').length,
+          late: records.filter(x => x.status === 'Late').length
+        };
+        const recordObj = {
+          ...sess,
+          summary
+        };
+        daily[slotKey] = recordObj;
+        daily[sess.subject] = recordObj;
+      }
+      saveDailyRecords(dStr, daily);
+    }
+  } catch (err) {
+    console.warn('[attendance] Error syncing records from Google Sheet:', err.message);
+  }
+}
+
 /**
  * Record attendance for a given subject and date.
  * All registered students not in parsedItems default to Present!
  */
-function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems }) {
+async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems }) {
   const students = getStudents();
   const daily = getDailyRecords(dateStr);
 
@@ -288,13 +371,17 @@ function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems 
 
   // Sync to Google Sheet if configured
   if (isGoogleSheetEnabled()) {
-    callGoogleSheet('recordAttendance', {
-      dateStr,
-      timeSlot,
-      subject,
-      recordedBy,
-      fullRecords
-    }).catch(e => console.warn('[GoogleSheet Sync Error]:', e.message));
+    try {
+      await callGoogleSheet('recordAttendance', {
+        dateStr,
+        timeSlot,
+        subject,
+        recordedBy,
+        fullRecords
+      });
+    } catch (e) {
+      console.warn('[GoogleSheet Sync Error]:', e.message);
+    }
   }
 
   return {
@@ -309,7 +396,11 @@ function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems 
  * Returns complete day status including all scheduled sessions,
  * whether they were recorded or forgotten by the class monitor.
  */
-function getDayAttendanceStatus(dateStr, timetableHelper) {
+async function getDayAttendanceStatus(dateStr, timetableHelper) {
+  if (isGoogleSheetEnabled()) {
+    await syncFromGoogleSheet();
+  }
+
   const targetDate = dayjs(dateStr);
   const { DAYS, KHMER_DAYS, getTodaySlots } = timetableHelper;
   const dayName = DAYS[targetDate.day()];
@@ -334,14 +425,24 @@ function getDayAttendanceStatus(dateStr, timetableHelper) {
 
   const sessions = slots.map((slot, idx) => {
     const slotTime = `${slot.start} - ${slot.end}`;
-    // Find record by exact slotTime or fallback
+    // 1. Strict match by slotTime (e.g. "07:00 - 08:00")
     let rec = daily[slotTime] || daily[`${slot.start}-${slot.end}`];
+
+    // 2. If not found, match by slotTime in record object
     if (!rec) {
       const foundKey = Object.keys(daily).find(k => {
         const item = daily[k];
-        return item && (item.timeSlot === slotTime || item.subject === slot.subject);
+        return item && (item.timeSlot === slotTime || item.timeSlot === `${slot.start} - ${slot.end}`);
       });
       if (foundKey) rec = daily[foundKey];
+    }
+
+    // 3. Fallback match by subject ONLY IF candidate record does not belong to another scheduled slotTime
+    if (!rec && daily[slot.subject]) {
+      const candidate = daily[slot.subject];
+      if (!candidate.timeSlot || candidate.timeSlot === slotTime || !slots.some(s => `${s.start} - ${s.end}` === candidate.timeSlot)) {
+        rec = candidate;
+      }
     }
 
     if (rec && rec.records && rec.records.length > 0) {
@@ -389,7 +490,11 @@ function getDayAttendanceStatus(dateStr, timetableHelper) {
 /**
  * Computes attendance summary for a custom date range (From startDate to endDate)
  */
-function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelper) {
+async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelper) {
+  if (isGoogleSheetEnabled()) {
+    await syncFromGoogleSheet();
+  }
+
   const start = dayjs(startDateStr);
   const end = dayjs(endDateStr);
   const students = getStudents();
@@ -399,7 +504,7 @@ function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelper) {
 
   while (curr.isBefore(end) || curr.isSame(end, 'day')) {
     const dStr = curr.format('YYYY-MM-DD');
-    const dayStat = getDayAttendanceStatus(dStr, timetableHelper);
+    const dayStat = await getDayAttendanceStatus(dStr, timetableHelper);
     if (dayStat.hasTimetable) {
       daysList.push(dayStat);
     }

@@ -4,7 +4,7 @@ const { DAYS, KHMER_DAYS, getTodaySlots } = require('../src/timetable');
 
 async function testFullDay() {
   console.log('Testing Saturday 2026-10-31...');
-  const dayStatus = getDayAttendanceStatus('2026-10-31', { DAYS, KHMER_DAYS, getTodaySlots });
+  const dayStatus = await getDayAttendanceStatus('2026-10-31', { DAYS, KHMER_DAYS, getTodaySlots });
   console.log('Day Status:', {
     dateStr: dayStatus.dateStr,
     dayName: dayStatus.dayName,

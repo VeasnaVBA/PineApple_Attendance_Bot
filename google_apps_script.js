@@ -144,19 +144,38 @@ function saveStudentsData(ss, students) {
   }
 }
 
+function formatDateIso(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Asia/Phnom_Penh', 'yyyy-MM-dd');
+  }
+  var str = String(val).replace(/\s*\(.*\)/, '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+  try {
+    var d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return Utilities.formatDate(d, 'Asia/Phnom_Penh', 'yyyy-MM-dd');
+    }
+  } catch (e) {}
+  return String(val).substring(0, 10);
+}
+
 function recordAttendanceData(ss, payload) {
   var s = ss.getSheetByName('Attendance');
   var dateStr = payload.dateStr;
-  var timeSlot = payload.timeSlot;
-  var subject = payload.subject;
+  var timeSlot = String(payload.timeSlot || '').trim();
+  var subject = String(payload.subject || '').trim();
   var recordedBy = payload.recordedBy;
   var fullRecords = payload.fullRecords || [];
   var timestamp = new Date().toISOString();
 
-  // Delete existing records for same date + subject to avoid duplicate overwrites
+  // Delete existing records for same date + timeSlot + subject to avoid duplicate overwrites
   var data = s.getDataRange().getValues();
   for (var i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][0]) === dateStr && String(data[i][2]) === subject) {
+    var rowDate = formatDateIso(data[i][0]);
+    var rowTime = String(data[i][1]).trim();
+    var rowSubj = String(data[i][2]).trim();
+    if (rowDate === dateStr && rowTime === timeSlot && rowSubj === subject) {
       s.deleteRow(i + 1);
     }
   }
@@ -189,23 +208,21 @@ function getAttendanceData(ss, singleDate, startDate, endDate) {
   var records = [];
 
   for (var i = 1; i < data.length; i++) {
-    var rowDate = String(data[i][0]);
+    var rowDate = formatDateIso(data[i][0]);
     var match = false;
-    if (singleDate && rowDate === singleDate) {
-      match = true;
+    if (singleDate) {
+      if (rowDate === singleDate) match = true;
     } else if (startDate && endDate) {
-      if (rowDate >= startDate && rowDate <= endDate) {
-        match = true;
-      }
-    } else if (!singleDate && !startDate && !endDate) {
+      if (rowDate >= startDate && rowDate <= endDate) match = true;
+    } else {
       match = true;
     }
 
-    if (match) {
+    if (match && data[i][1] && data[i][3]) {
       records.push({
         date: rowDate,
-        timeSlot: String(data[i][1]),
-        subject: String(data[i][2]),
+        timeSlot: String(data[i][1]).trim(),
+        subject: String(data[i][2]).trim(),
         id: String(data[i][3]),
         name: String(data[i][4]),
         status: String(data[i][5]),

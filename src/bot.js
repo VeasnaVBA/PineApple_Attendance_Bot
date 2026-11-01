@@ -743,7 +743,7 @@ async function sendFullDayReport(ctx, dateStr) {
     });
   }
 
-  const dayStatus = getDayAttendanceStatus(dateStr, { DAYS, KHMER_DAYS, getTodaySlots });
+  const dayStatus = await getDayAttendanceStatus(dateStr, { DAYS, KHMER_DAYS, getTodaySlots });
 
   if (!dayStatus.hasTimetable) {
     return ctx.reply(`⚠️ *ថ្ងៃ${dayStatus.khmerDay} (${dayjs(dateStr).format('DD-MM-YYYY')}) មិនមានកាលវិភាគសិក្សាទេ!*`, {
@@ -923,7 +923,7 @@ async function sendRangeReport(ctx, startDateStr, endDateStr, customTitle = null
     });
   }
 
-  const rangeData = getRangeAttendanceStatus(startDateStr, endDateStr, { DAYS, KHMER_DAYS, getTodaySlots });
+  const rangeData = await getRangeAttendanceStatus(startDateStr, endDateStr, { DAYS, KHMER_DAYS, getTodaySlots });
 
   if (rangeData.totalSchoolDays === 0) {
     return ctx.reply(
@@ -1301,7 +1301,7 @@ bot.on('message:text', async (ctx, next) => {
 
     const recordedBy = ctx.from?.first_name || 'ប្រធានថ្នាក់';
 
-    const result = recordAttendance({
+    const result = await recordAttendance({
       dateStr,
       subject,
       timeSlot,
