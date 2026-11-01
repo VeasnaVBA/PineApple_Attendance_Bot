@@ -623,13 +623,19 @@ async function clearAttendanceDatabase(targetDate = null) {
 
   // Clear in-memory cache
   if (targetDate) {
-    delete memoryDailyRecords[targetDate];
+    if (typeof memoryDailyRecords.delete === 'function') {
+      memoryDailyRecords.delete(targetDate);
+    } else {
+      delete memoryDailyRecords[targetDate];
+    }
     try {
       const p = path.join(RECORDS_DIR, `attendance-${targetDate}.json`);
       if (fs.existsSync(p)) fs.unlinkSync(p);
     } catch (e) {}
   } else {
-    memoryDailyRecords = {};
+    if (typeof memoryDailyRecords.clear === 'function') {
+      memoryDailyRecords.clear();
+    }
     try {
       if (fs.existsSync(RECORDS_DIR)) {
         const files = fs.readdirSync(RECORDS_DIR);
@@ -673,7 +679,9 @@ async function clearAllDatabase() {
       sheetResult = { status: 'error', message: err.message };
     }
   }
-  memoryDailyRecords = {};
+  if (typeof memoryDailyRecords.clear === 'function') {
+    memoryDailyRecords.clear();
+  }
   saveStudents([]);
   try {
     if (fs.existsSync(RECORDS_DIR)) {

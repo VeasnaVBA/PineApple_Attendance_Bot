@@ -817,13 +817,26 @@ bot.callbackQuery('cls_do_today', async (ctx) => {
   ctx.editMessageText(`⏳ *កំពុងលុបកំណត់ត្រាវត្តមានថ្ងៃនេះ (${todayStr}) ក្នុង Google Sheet...*`, {
     parse_mode: 'Markdown'
   }).catch(() => {});
-  await clearAttendanceDatabase(todayStr);
-  await ctx.editMessageText(
-    `🗑 *បានលុបកំណត់ត្រាវត្តមានថ្ងៃនេះ (${todayStr}) ជោគជ័យ!* \n\n` +
-    `✅ កំណត់ត្រាវត្តមានថ្ងៃនេះត្រូវបានលុបចេញពី Google Sheet។\n` +
-    `✅ ទិន្នន័យថ្ងៃផ្សេងៗ និងបញ្ជីឈ្មោះសិស្សនៅរក្សាទុកដដែល។`,
-    { parse_mode: 'Markdown' }
-  ).catch(() => {});
+
+  try {
+    const res = await clearAttendanceDatabase(todayStr);
+    if (res && res.status === 'error') {
+      return ctx.editMessageText(
+        `⚠️ *មិនអាចលុបក្នុង Google Sheet បានទេ:*\n` +
+        `\`${res.message}\`\n\n` +
+        `👉 *មូលហេតុ:* Google Apps Script មិនទាន់ស្គាល់មុខងារនេះទេ។ សូមលោកគ្រូចម្លងកូដពី \`google_apps_script.js\` ទៅ Paste ក្នុង Google Sheet ➔ Deploy ➔ New version សិនបាទ!`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+    await ctx.editMessageText(
+      `🗑 *បានលុបកំណត់ត្រាវត្តមានថ្ងៃនេះ (${todayStr}) ជោគជ័យ!* \n\n` +
+      `✅ កំណត់ត្រាវត្តមានថ្ងៃនេះត្រូវបានលុបចេញពី Google Sheet។\n` +
+      `✅ ទិន្នន័យថ្ងៃផ្សេងៗ និងបញ្ជីឈ្មោះសិស្សនៅរក្សាទុកដដែល។`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  } catch (err) {
+    await ctx.editMessageText(`❌ មានបញ្ហា: ${err.message}`, { parse_mode: 'Markdown' }).catch(() => {});
+  }
 });
 
 bot.callbackQuery('cls_do_all_att', async (ctx) => {
@@ -831,14 +844,27 @@ bot.callbackQuery('cls_do_all_att', async (ctx) => {
   ctx.editMessageText('⏳ *កំពុងលុបកំណត់ត្រាវត្តមានទាំងអស់ក្នុង Google Sheet...*', {
     parse_mode: 'Markdown'
   }).catch(() => {});
-  await clearAttendanceDatabase();
-  await ctx.editMessageText(
-    `🗑 *បានលុបកំណត់ត្រាវត្តមានទាំងអស់ជោគជ័យ! (All Attendance Cleared)*\n\n` +
-    `✅ រាល់កំណត់ត្រាវត្តមានគ្រប់ថ្ងៃត្រូវបានលុបចេញពី Google Sheet។\n` +
-    `✅ Memory Cache ក្នុង Bot ត្រូវបាន Reset។\n` +
-    `👥 បញ្ជីឈ្មោះសិស្សទាំង ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកពេញលេញ ១០០% ដដែល។`,
-    { parse_mode: 'Markdown' }
-  ).catch(() => {});
+
+  try {
+    const res = await clearAttendanceDatabase();
+    if (res && res.status === 'error') {
+      return ctx.editMessageText(
+        `⚠️ *មិនអាចលុបក្នុង Google Sheet បានទេ:*\n` +
+        `\`${res.message}\`\n\n` +
+        `👉 *មូលហេតុ:* Google Apps Script មិនទាន់ស្គាល់មុខងារនេះទេ។ សូមលោកគ្រូចម្លងកូដពី \`google_apps_script.js\` ទៅ Paste ក្នុង Google Sheet ➔ Deploy ➔ New version សិនបាទ!`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+    await ctx.editMessageText(
+      `🗑 *បានលុបកំណត់ត្រាវត្តមានទាំងអស់ជោគជ័យ! (All Attendance Cleared)*\n\n` +
+      `✅ រាល់កំណត់ត្រាវត្តមានគ្រប់ថ្ងៃត្រូវបានលុបចេញពី Google Sheet។\n` +
+      `✅ Memory Cache ក្នុង Bot ត្រូវបាន Reset។\n` +
+      `👥 បញ្ជីឈ្មោះសិស្សទាំង ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកពេញលេញ ១០០% ដដែល។`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  } catch (err) {
+    await ctx.editMessageText(`❌ មានបញ្ហា: ${err.message}`, { parse_mode: 'Markdown' }).catch(() => {});
+  }
 });
 
 bot.callbackQuery('cls_do_students', async (ctx) => {
@@ -846,13 +872,26 @@ bot.callbackQuery('cls_do_students', async (ctx) => {
   ctx.editMessageText('⏳ *កំពុងសម្អាតបញ្ជីឈ្មោះសិស្សក្នុង Google Sheet...*', {
     parse_mode: 'Markdown'
   }).catch(() => {});
-  await clearStudentsDatabase();
-  await ctx.editMessageText(
-    `👥 *បានសម្អាតបញ្ជីឈ្មោះសិស្សក្នុង Google Sheet ជោគជ័យ! (Students Cleared)*\n\n` +
-    `✅ តារាងសិស្សក្នុង Google Sheet ត្រូវបានសម្អាត។\n` +
-    `👉 លោកគ្រូអាចប្រើ /addstudent ដើម្បីបញ្ចូលសិស្សថ្មីឡើងវិញ។`,
-    { parse_mode: 'Markdown' }
-  ).catch(() => {});
+
+  try {
+    const res = await clearStudentsDatabase();
+    if (res && res.status === 'error') {
+      return ctx.editMessageText(
+        `⚠️ *មិនអាចលុបក្នុង Google Sheet បានទេ:*\n` +
+        `\`${res.message}\`\n\n` +
+        `👉 *មូលហេតុ:* Google Apps Script មិនទាន់ស្គាល់មុខងារនេះទេ។ សូមលោកគ្រូចម្លងកូដពី \`google_apps_script.js\` ទៅ Paste ក្នុង Google Sheet ➔ Deploy ➔ New version សិនបាទ!`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+    await ctx.editMessageText(
+      `👥 *បានសម្អាតបញ្ជីឈ្មោះសិស្សក្នុង Google Sheet ជោគជ័យ! (Students Cleared)*\n\n` +
+      `✅ តារាងសិស្សក្នុង Google Sheet ត្រូវបានសម្អាត។\n` +
+      `👉 លោកគ្រូអាចប្រើ /addstudent ដើម្បីបញ្ចូលសិស្សថ្មីឡើងវិញ។`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  } catch (err) {
+    await ctx.editMessageText(`❌ មានបញ្ហា: ${err.message}`, { parse_mode: 'Markdown' }).catch(() => {});
+  }
 });
 
 bot.callbackQuery('cls_do_reset_all', async (ctx) => {
@@ -860,12 +899,25 @@ bot.callbackQuery('cls_do_reset_all', async (ctx) => {
   ctx.editMessageText('⏳ *កំពុង Reset ទិន្នន័យទាំងអស់ក្នុង Google Sheet...*', {
     parse_mode: 'Markdown'
   }).catch(() => {});
-  await clearAllDatabase();
-  await ctx.editMessageText(
-    `💣 *បាន Reset ទិន្នន័យទាំងអស់ក្នុង Google Sheet ជោគជ័យ! (Reset Everything)*\n\n` +
-    `✅ រាល់កំណត់ត្រាវត្តមាន និងបញ្ជីឈ្មោះសិស្សត្រូវបានសម្អាតទាំងស្រុង។`,
-    { parse_mode: 'Markdown' }
-  ).catch(() => {});
+
+  try {
+    const res = await clearAllDatabase();
+    if (res && res.status === 'error') {
+      return ctx.editMessageText(
+        `⚠️ *មិនអាច Reset Google Sheet បានទេ:*\n` +
+        `\`${res.message}\`\n\n` +
+        `👉 *មូលហេតុ:* Google Apps Script មិនទាន់ស្គាល់មុខងារនេះទេ។ សូមលោកគ្រូចម្លងកូដពី \`google_apps_script.js\` ទៅ Paste ក្នុង Google Sheet ➔ Deploy ➔ New version សិនបាទ!`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+    }
+    await ctx.editMessageText(
+      `💣 *បាន Reset ទិន្នន័យទាំងអស់ក្នុង Google Sheet ជោគជ័យ! (Reset Everything)*\n\n` +
+      `✅ រាល់កំណត់ត្រាវត្តមាន និងបញ្ជីឈ្មោះសិស្សត្រូវបានសម្អាតទាំងស្រុង។`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  } catch (err) {
+    await ctx.editMessageText(`❌ មានបញ្ហា: ${err.message}`, { parse_mode: 'Markdown' }).catch(() => {});
+  }
 });
 
 // /setclearpassword command (Teacher Only)
