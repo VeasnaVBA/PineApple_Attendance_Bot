@@ -143,8 +143,8 @@ function parseAttendanceInput(text) {
   const parsedItems = [];
   const unrecognized = [];
 
-  // Regex matches: optional numbering/bullet, then name or id, then status code (P|A|L), then optional note
-  const lineRegex = /^(?:[\d\.\-\*\•\)\s]+)?(.+?)[\s\:\=\-]+([PALpal])(?:\s*[\:\-]?\s*(.*))?$/;
+  // Regex matches: optional numbering/bullet, then name or id, then status code (P|A|L|V|✓|present|វត្តមាន), then optional note
+  const lineRegex = /^(?:[\d\.\-\*\•\)\s]+)?(.+?)[\s\:\=\-]+([PALVpalv✓]|present|វត្តមាន)(?:\s*[\:\-]?\s*(.*))?$/i;
 
   for (const line of lines) {
     if (line.startsWith('/')) continue;
@@ -152,13 +152,25 @@ function parseAttendanceInput(text) {
     const match = line.match(lineRegex);
     if (match) {
       const rawName = match[1].trim();
-      const code = match[2].toUpperCase();
+      const rawCode = match[2].trim();
       const note = match[3] ? match[3].trim() : '';
 
       let status = 'Present';
-      if (code === 'A') status = 'Absent';
-      else if (code === 'P') status = 'Permission';
-      else if (code === 'L') status = 'Late';
+      let code = '✓';
+      const upper = rawCode.toUpperCase();
+      if (upper === 'A') {
+        status = 'Absent';
+        code = 'A';
+      } else if (upper === 'P') {
+        status = 'Permission';
+        code = 'P';
+      } else if (upper === 'L') {
+        status = 'Late';
+        code = 'L';
+      } else if (upper === 'V' || rawCode === '✓' || upper === 'PRESENT' || rawCode === 'វត្តមាន') {
+        status = 'Present';
+        code = '✓';
+      }
 
       parsedItems.push({
         rawName,
@@ -301,7 +313,8 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
   const students = getStudents();
   const daily = getDailyRecords(dateStr);
 
-  const existingSubjectRecord = daily[subject] || {
+  const slotKey = timeSlot ? timeSlot.trim() : subject;
+  const existingSubjectRecord = daily[slotKey] || daily[subject] || {
     date: dateStr,
     subject,
     timeSlot: timeSlot || 'Class Time',
@@ -310,6 +323,21 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
     records: []
   };
 
+  // Build map of existing recorded statuses to support adding more students to an existing session
+  const existingMap = {};
+  if (Array.isArray(existingSubjectRecord.records)) {
+    existingSubjectRecord.records.forEach(r => {
+      if (r && r.id) {
+        const idPad = String(r.id).padStart(2, '0');
+        existingMap[idPad] = {
+          status: r.status,
+          code: r.code,
+          note: r.note || ''
+        };
+      }
+    });
+  }
+
   const matchedStudentIds = new Set();
   const notFoundNames = [];
 
@@ -317,8 +345,9 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
   for (const item of parsedItems) {
     const matched = findStudentMatch(item.rawName, students);
     if (matched) {
-      matchedStudentIds.add(matched.id);
-      statusMap[matched.id] = {
+      const padId = String(matched.id).padStart(2, '0');
+      matchedStudentIds.add(padId);
+      statusMap[padId] = {
         code: item.code,
         status: item.status,
         note: item.note
@@ -330,11 +359,13 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
 
   // Build complete list of all 30 students
   const fullRecords = students.map((stu, index) => {
-    const mark = statusMap[stu.id];
+    const padId = String(stu.id).padStart(2, '0');
+    // 1. Newly marked in this update has highest priority
+    const mark = statusMap[padId];
     if (mark) {
       return {
         no: index + 1,
-        id: stu.id,
+        id: padId,
         name: stu.name,
         gender: stu.gender || 'Unknown',
         dob: stu.dob || '',
@@ -343,10 +374,24 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
         note: mark.note || ''
       };
     }
-    // Default to Present
+    // 2. Previously marked in this session (e.g. earlier absent/permission kept when adding more)
+    const existing = existingMap[padId];
+    if (existing && existing.status && existing.status !== 'Present') {
+      return {
+        no: index + 1,
+        id: padId,
+        name: stu.name,
+        gender: stu.gender || 'Unknown',
+        dob: stu.dob || '',
+        status: existing.status,
+        code: existing.code,
+        note: existing.note || ''
+      };
+    }
+    // 3. Default to Present
     return {
       no: index + 1,
-      id: stu.id,
+      id: padId,
       name: stu.name,
       gender: stu.gender || 'Unknown',
       dob: stu.dob || '',
@@ -375,7 +420,6 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
   };
 
   // Key by timeSlot so multiple sessions of the same subject on the same day don't overwrite
-  const slotKey = timeSlot ? timeSlot.trim() : subject;
   daily[slotKey] = updatedSubjectRecord;
   daily[subject] = updatedSubjectRecord; // fallback reference
   saveDailyRecords(dateStr, daily);

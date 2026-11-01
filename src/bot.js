@@ -310,9 +310,11 @@ bot.callbackQuery(/^rec_date_(.+)$/, async (ctx) => {
   const dayName = DAYS[targetDate.day()];
   const khmerDay = KHMER_DAYS[dayName];
 
+  // Fetch complete day status to see which slots have already been recorded
+  const dayStatus = await getDayAttendanceStatus(dateStr, { DAYS, KHMER_DAYS, getTodaySlots });
   const slots = getTodaySlots(targetDate);
 
-  if (slots.length === 0) {
+  if (slots.length === 0 && dayStatus.scheduledSessions.length === 0) {
     const keyboard = new InlineKeyboard()
       .text('🔙 ជ្រើសរើសថ្ងៃផ្សេង', 'cmd_start_record')
       .row()
@@ -326,19 +328,63 @@ bot.callbackQuery(/^rec_date_(.+)$/, async (ctx) => {
   }
 
   const keyboard = new InlineKeyboard();
-  slots.forEach(slot => {
-    keyboard.text(
-      `⏰ ${slot.start}-${slot.end}: ${slot.subject}`,
-      `rec_slot_${dateStr}_${slot.start.replace(':', '')}_${slot.end.replace(':', '')}`
-    ).row();
-  });
+
+  if (slots.length > 0) {
+    slots.forEach(slot => {
+      const slotTime = `${slot.start} - ${slot.end}`;
+      const matchedSess = dayStatus.scheduledSessions.find(s => {
+        const st = s.timeSlot;
+        return (st === slotTime || st === `${slot.start}-${slot.end}` || st === slot.start || s.subject === slot.subject) && s.isRecorded;
+      });
+
+      if (matchedSess) {
+        const sum = matchedSess.summary || {};
+        let noteStr = '✅ បានកត់រួច';
+        if (sum.absent > 0 || sum.permission > 0 || sum.late > 0) {
+          noteStr += ` (A:${sum.absent || 0}, P:${sum.permission || 0}${sum.late ? `, L:${sum.late}` : ''})`;
+        } else {
+          noteStr += ' (គ្រប់ 30)';
+        }
+        keyboard.text(
+          `✅ ${slot.start}-${slot.end}: ${slot.subject} ${noteStr}`,
+          `rec_slot_${dateStr}_${slot.start.replace(':', '')}_${slot.end.replace(':', '')}`
+        ).row();
+      } else {
+        keyboard.text(
+          `⚪ ${slot.start}-${slot.end}: ${slot.subject} (មិនទាន់កត់)`,
+          `rec_slot_${dateStr}_${slot.start.replace(':', '')}_${slot.end.replace(':', '')}`
+        ).row();
+      }
+    });
+  } else {
+    // Weekend / extra recorded sessions
+    dayStatus.scheduledSessions.forEach(sess => {
+      const sum = sess.summary || {};
+      let noteStr = '✅ បានកត់រួច';
+      if (sum.absent > 0 || sum.permission > 0) {
+        noteStr += ` (A:${sum.absent || 0}, P:${sum.permission || 0})`;
+      }
+      keyboard.text(
+        `✅ ${sess.timeSlot}: ${sess.subject} ${noteStr}`,
+        `rec_slot_${dateStr}_${sess.timeSlot.replace(/[^0-9]/g, '').slice(0, 4) || '0700'}_${sess.timeSlot.replace(/[^0-9]/g, '').slice(4, 8) || '0800'}`
+      ).row();
+    });
+  }
+
   keyboard.text('🔙 ថយក្រោយ (Back)', 'cmd_start_record').text('❌ បោះបង់', 'rec_cancel');
+
+  const recordedCount = dayStatus.scheduledSessions.filter(s => s.isRecorded).length;
+  const totalSlotsCount = slots.length > 0 ? slots.length : dayStatus.scheduledSessions.length;
 
   const text =
 `📋 *កត់ត្រាវត្តមានសិស្ស (Record Attendance)*
 📅 *កាលបរិច្ឆេទ:* ថ្ងៃ${khmerDay}, ${targetDate.format('DD MMMM YYYY')}
+📊 *ស្ថានភាព:* បានកត់ត្រា *${recordedCount}/${totalSlotsCount}* ម៉ោង
 
-👉 *ជំហានទី ២:* សូមជ្រើសរើស **ម៉ោងសិក្សា (Time Slot)** ដើម្បីកត់វត្តមាន៖`;
+🟢 = ម៉ោងបានកត់រួច (ចុចលើវាដើម្បី *កត់សិស្សបន្ថែម* ឬ *កែប្រែ*)
+⚪ = ម៉ោងមិនទាន់បានកត់ត្រា (ចុចដើម្បីចាប់ផ្តើមកត់)
+
+👉 *សូមជ្រើសរើស ម៉ោងសិក្សា (Time Slot) ដើម្បីបន្ត៖*`;
 
   await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
 });
@@ -378,13 +424,27 @@ bot.callbackQuery(/^rec_slot_([^_]+)_([^_]+)_(.+)$/, async (ctx) => {
     timestamp: Date.now()
   });
 
-  const promptText =
-`✅ *បានជ្រើសរើសមុខវិជ្ជា និងម៉ោងរួចរាល់!*
-📅 *កាលបរិច្ឆេទ:* ថ្ងៃ${khmerDay}, ${targetDate.format('DD-MM-YYYY')}
-⏰ *ម៉ោងសិក្សា:* \`${startTime} - ${endTime}\`
-📚 *មុខវិជ្ជា:* *${subject}*
+  // Check if slot has existing record
+  const daily = getDailyRecords(dateStr);
+  const slotTime = `${startTime} - ${endTime}`;
+  const existingRecord = daily[slotTime] || daily[`${startTime}-${endTime}`] || daily[subject];
+  const isRecorded = existingRecord && Array.isArray(existingRecord.records) && existingRecord.records.length > 0;
 
-👇 *ជំហានទី ៣:* សូមវាយឈ្មោះ ឬលេខរៀងសិស្សដែល អវត្តមាន(A), សុំច្បាប់(P), ឬ មកយឺត(L) រួចចុច **Send/Enter**:
+  let statusBanner = '';
+  if (isRecorded) {
+    const nonPresent = existingRecord.records.filter(r => r.status !== 'Present');
+    statusBanner = `ℹ️ *ម៉ោងនេះបានកត់ត្រារួចម្តងហើយ!* (កត់ត្រាដោយ: ${existingRecord.recordedBy || 'ប្រធានថ្នាក់'})\n`;
+    if (nonPresent.length > 0) {
+      statusBanner += `📋 *សិស្សដែលបានកត់កន្លងមក (${nonPresent.length} នាក់):*\n`;
+      statusBanner += nonPresent.map(r => `• \`${r.id}\` ${r.name} - *${r.code}* ${r.note ? `(${r.note})` : ''}`).join('\n') + `\n\n`;
+      statusBanner += `➕ *លោកគ្រូ ឬប្រធានថ្នាក់ អាចវាយឈ្មោះ/លេខសិស្សបន្ថែម* (សិស្សចាស់ៗនៅតែរក្សាទុកដដែល) ឬវាយ \`01 V\` ដើម្បីប្តូរមក "មានវត្តមាន" វិញ។`;
+    } else {
+      statusBanner += `✅ កាលពីកត់លើកមុន គឺ *មានវត្តមានពេញលេញទាំង ${existingRecord.records.length} នាក់*។\n\n` +
+        `➕ *លោកគ្រូ ឬប្រធានថ្នាក់ អាចវាយឈ្មោះ/លេខសិស្សបន្ថែម* ប្រសិនបើមានសិស្សអវត្តមាន (A), សុំច្បាប់ (P), ឬ មកយឺត (L)។`;
+    }
+  } else {
+    statusBanner =
+`👇 *ជំហានទី ៣:* សូមវាយឈ្មោះ ឬលេខរៀងសិស្សដែល អវត្តមាន(A), សុំច្បាប់(P), ឬ មកយឺត(L) រួចចុច **Send/Enter**:
 
 *ឧទាហរណ៍:*
 \`\`\`
@@ -392,10 +452,22 @@ bot.callbackQuery(/^rec_slot_([^_]+)_([^_]+)_(.+)$/, async (ctx) => {
 06 L
 ខា សិនហួ P (ឈឺ)
 \`\`\`
-_(💡 សិស្សដែលមិនបានសរសេរ គឺប្រព័ន្ធកត់ត្រាថា "មានវត្តមាន" ទាំងអស់ដោយស្វ័យប្រវត្តិ)_
+_(💡 សិស្សដែលមិនបានសរសេរ គឺប្រព័ន្ធកត់ត្រាថា "មានវត្តមាន" ទាំងអស់ដោយស្វ័យប្រវត្តិ)_`;
+  }
+
+  const promptText =
+`📋 *កត់ត្រាវត្តមានសិស្ស (Record Attendance)*
+📅 *កាលបរិច្ឆេទ:* ថ្ងៃ${khmerDay}, ${targetDate.format('DD-MM-YYYY')}
+⏰ *ម៉ោងសិក្សា:* \`${startTime} - ${endTime}\`
+📚 *មុខវិជ្ជា:* *${subject}*
+
+${statusBanner}
+
 _(វាយ \`/cancel\` ប្រសិនបើចង់បោះបង់)_`;
 
-  const keyboard = new InlineKeyboard().text('❌ បោះបង់ (Cancel)', 'rec_cancel');
+  const keyboard = new InlineKeyboard()
+    .text('🔙 ជ្រើសរើសម៉ោងផ្សេង', `rec_date_${dateStr}`)
+    .text('❌ បោះបង់ (Cancel)', 'rec_cancel');
   await ctx.editMessageText(promptText, { parse_mode: 'Markdown', reply_markup: keyboard });
 });
 
@@ -1585,9 +1657,10 @@ bot.on('message:text', async (ctx, next) => {
 ${result.notFoundNames.map(n => `• _${n}_`).join('\n')}`;
     }
 
-    let keyboard = undefined;
+    const keyboard = new InlineKeyboard()
+      .text('➕ កត់ម៉ោងផ្សេងទៀតក្នុងថ្ងៃនេះ', `rec_date_${dateStr}`);
     if (checkIsTeacher(ctx)) {
-      keyboard = new InlineKeyboard().text('📥 ទាញយករបាយការណ៍ (Excel)', `get_fullday_${dateStr}`);
+      keyboard.row().text('📥 ទាញយករបាយការណ៍ (Excel)', `get_fullday_${dateStr}`);
     }
 
     await ctx.reply(replyMsg, {
