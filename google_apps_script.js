@@ -73,8 +73,15 @@ function handleRequest(e) {
       saveSubjectsData(ss, postData.subjects || {});
       result.message = 'Subjects saved successfully';
     } else if (action === 'clearAttendance') {
-      clearAttendanceData(ss);
-      result.message = 'Attendance data cleared successfully';
+      var targetDate = params.date || postData.date;
+      clearAttendanceData(ss, targetDate);
+      result.message = targetDate ? 'Attendance data for ' + targetDate + ' cleared successfully' : 'All attendance data cleared successfully';
+    } else if (action === 'clearStudents') {
+      clearStudentsSheet(ss);
+      result.message = 'Students data cleared successfully';
+    } else if (action === 'clearAll') {
+      clearAllSheetData(ss);
+      result.message = 'All data cleared successfully';
     } else {
       result = { status: 'error', message: 'Unknown action: ' + action };
     }
@@ -295,12 +302,36 @@ function saveSubjectsData(ss, subjects) {
   }
 }
 
-function clearAttendanceData(ss) {
+function clearAttendanceData(ss, targetDate) {
   var s = ss.getSheetByName('Attendance');
-  if (s) {
+  if (!s) return;
+  if (targetDate) {
+    var data = s.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      var rowDate = formatDateIso(data[i][0]);
+      if (rowDate === targetDate) {
+        s.deleteRow(i + 1);
+      }
+    }
+  } else {
     s.clearContents();
     s.appendRow(['Date', 'TimeSlot', 'Subject', 'StudentID', 'StudentName', 'Status', 'Code', 'Note', 'RecordedBy', 'Timestamp']);
     s.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
   }
 }
+
+function clearStudentsSheet(ss) {
+  var s = ss.getSheetByName('Students');
+  if (s) {
+    s.clearContents();
+    s.appendRow(['No', 'ID', 'Name', 'Gender', 'DOB']);
+    s.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  }
+}
+
+function clearAllSheetData(ss) {
+  clearAttendanceData(ss);
+  clearStudentsSheet(ss);
+}
+
 

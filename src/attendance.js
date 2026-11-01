@@ -610,11 +610,11 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
   };
 }
 
-async function clearAttendanceDatabase() {
+async function clearAttendanceDatabase(targetDate = null) {
   let sheetResult = null;
   if (isGoogleSheetEnabled()) {
     try {
-      sheetResult = await callGoogleSheet('clearAttendance');
+      sheetResult = await callGoogleSheet('clearAttendance', targetDate ? { date: targetDate } : {});
     } catch (err) {
       console.error('[attendance] Error clearing Google Sheet attendance:', err.message);
       sheetResult = { status: 'error', message: err.message };
@@ -622,9 +622,59 @@ async function clearAttendanceDatabase() {
   }
 
   // Clear in-memory cache
-  memoryDailyRecords = {};
+  if (targetDate) {
+    delete memoryDailyRecords[targetDate];
+    try {
+      const p = path.join(RECORDS_DIR, `attendance-${targetDate}.json`);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    } catch (e) {}
+  } else {
+    memoryDailyRecords = {};
+    try {
+      if (fs.existsSync(RECORDS_DIR)) {
+        const files = fs.readdirSync(RECORDS_DIR);
+        for (const f of files) {
+          if (f.startsWith('attendance-') && f.endsWith('.json')) {
+            try {
+              fs.unlinkSync(path.join(RECORDS_DIR, f));
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[attendance] Local records cleanup warning:', e.message);
+    }
+  }
 
-  // Clear local JSON records if any exist
+  return sheetResult || { status: 'success' };
+}
+
+async function clearStudentsDatabase() {
+  let sheetResult = null;
+  if (isGoogleSheetEnabled()) {
+    try {
+      sheetResult = await callGoogleSheet('clearStudents');
+    } catch (err) {
+      console.error('[attendance] Error clearing Google Sheet students:', err.message);
+      sheetResult = { status: 'error', message: err.message };
+    }
+  }
+  saveStudents([]);
+  return sheetResult || { status: 'success' };
+}
+
+async function clearAllDatabase() {
+  let sheetResult = null;
+  if (isGoogleSheetEnabled()) {
+    try {
+      sheetResult = await callGoogleSheet('clearAll');
+    } catch (err) {
+      console.error('[attendance] Error resetting Google Sheet:', err.message);
+      sheetResult = { status: 'error', message: err.message };
+    }
+  }
+  memoryDailyRecords = {};
+  saveStudents([]);
   try {
     if (fs.existsSync(RECORDS_DIR)) {
       const files = fs.readdirSync(RECORDS_DIR);
@@ -636,10 +686,7 @@ async function clearAttendanceDatabase() {
         }
       }
     }
-  } catch (e) {
-    console.warn('[attendance] Local records cleanup warning:', e.message);
-  }
-
+  } catch (e) {}
   return sheetResult || { status: 'success' };
 }
 
@@ -657,6 +704,9 @@ module.exports = {
   recordAttendance,
   getDayAttendanceStatus,
   getRangeAttendanceStatus,
-  clearAttendanceDatabase
+  clearAttendanceDatabase,
+  clearStudentsDatabase,
+  clearAllDatabase
 };
+
 

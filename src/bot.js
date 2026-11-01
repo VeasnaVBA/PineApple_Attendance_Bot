@@ -35,7 +35,9 @@ const {
   recordAttendance,
   getDayAttendanceStatus,
   getRangeAttendanceStatus,
-  clearAttendanceDatabase
+  clearAttendanceDatabase,
+  clearStudentsDatabase,
+  clearAllDatabase
 } = require('./attendance');
 
 const {
@@ -655,6 +657,8 @@ bot.callbackQuery('cmd_clean_menu', async (ctx) => {
     .row()
     .text('🧹 សម្អាត ១០០ សារ', 'clean_count_100')
     .row()
+    .text('🗑️ សម្អាតទិន្នន័យក្នុង Sheet (ទាមទារ Password)', 'cmd_open_clearsheet_help')
+    .row()
     .text('❌ បោះបង់ (Cancel)', 'clean_dismiss');
 
   await ctx.reply(
@@ -678,7 +682,20 @@ bot.callbackQuery('clean_dismiss', async (ctx) => {
   } catch (e) {}
 });
 
-// --- CLEAR SHEET DATA (Requires Token Password) ---
+// Help callback from clean menu
+bot.callbackQuery('cmd_open_clearsheet_help', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.reply(
+    `🔑 *ការសម្អាតទិន្នន័យក្នុង Google Sheet (ទាមទារ Password)*\n\n` +
+    `ដើម្បីជ្រើសរើសទិន្នន័យដែលចង់លុប សូមវាយពាក្យបញ្ជា:\n` +
+    `\`/cleardata <password>\`\n\n` +
+    `👉 *ឧទាហរណ៍:* \`/cleardata pineapple123\`\n` +
+    `_(Password លំនាំដើមគឺ \`pineapple123\`)_`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// --- CLEAR SHEET DATA (Requires Token Password & Lets User Choose Data) ---
 bot.command(['cleardata', 'clearsheet'], async (ctx) => {
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/).slice(1);
@@ -692,9 +709,7 @@ bot.command(['cleardata', 'clearsheet'], async (ctx) => {
   if (!inputPassword) {
     return ctx.reply(
       `⚠️ *ពាក្យបញ្ជាសម្អាតទិន្នន័យក្នុង Sheet (Clear Sheet Data)*\n\n` +
-      `⚠️ *ការព្រមាន:* ពាក្យបញ្ជានេះនឹងលុបទិន្នន័យវត្តមាន (Attendance Records) ទាំងអស់ចេញពី Google Sheet និង Bot!\n` +
-      `*(បញ្ជីឈ្មោះសិស្ស ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកដដែល)*\n\n` +
-      `🔑 *ដើម្បីអនុវត្ត សូមបញ្ចូល Password ភ្ជាប់ជាមួយពាក្យបញ្ជា:*\n` +
+      `🔑 *ដើម្បីចូលទៅកាន់ផ្ទាំងជ្រើសរើសទិន្នន័យដែលត្រូវសម្អាត សូមបញ្ចូល Password:*\n` +
       `\`/cleardata <password>\`\n` +
       `ឬ\n` +
       `\`/clearsheet <password>\`\n\n` +
@@ -713,26 +728,144 @@ bot.command(['cleardata', 'clearsheet'], async (ctx) => {
     );
   }
 
-  const statusMsg = await ctx.reply('⏳ *កំពុងសម្អាតទិន្នន័យវត្តមានក្នុង Google Sheet... សូមរង់ចាំបន្តិច!*', {
+  const todayStr = dayjs().format('YYYY-MM-DD');
+  const keyboard = new InlineKeyboard()
+    .text(`📅 លុបវត្តមានតែថ្ងៃនេះ (${todayStr})`, 'cls_req_today')
+    .row()
+    .text('🗓️ លុបវត្តមានទាំងអស់ (All Attendance)', 'cls_req_all_att')
+    .row()
+    .text('👥 សម្អាតបញ្ជីសិស្ស (Clear Students)', 'cls_req_students')
+    .row()
+    .text('💣 លុប Reset ទាំងអស់ (Reset Everything)', 'cls_req_reset_all')
+    .row()
+    .text('❌ បោះបង់ (Cancel)', 'clean_dismiss');
+
+  await ctx.reply(
+    `🗂️ *ផ្ទាំងជ្រើសរើសទិន្នន័យដែលត្រូវសម្អាត (Clear Sheet Data Menu)*\n\n` +
+    `🔑 *Password បានផ្ទៀងផ្ទាត់ជោគជ័យ!* ✅\n\n` +
+    `👉 សូមជ្រើសរើសប្រភេទនៃទិន្នន័យដែលលោកគ្រូចង់លុបចេញពី Google Sheet:\n\n` +
+    `1️⃣ *លុបវត្តមានតែថ្ងៃនេះ (${todayStr}):* លុបតែកំណត់ត្រាវត្តមានថ្ងៃនេះ ទុកថ្ងៃផ្សេងៗ និងសិស្សនៅដដែល\n` +
+    `2️⃣ *លុបវត្តមានទាំងអស់ (All Attendance):* លុបកំណត់ត្រាវត្តមានគ្រប់ថ្ងៃ ទុកបញ្ជីសិស្ស ៤៤ នាក់ និងកាលវិភាគនៅដដែល\n` +
+    `3️⃣ *សម្អាតបញ្ជីសិស្ស (Clear Students):* សម្អាតតារាងបញ្ជីឈ្មោះសិស្ស (Students Sheet)\n` +
+    `4️⃣ *លុប Reset ទាំងអស់ (Reset Everything):* លុបទាំងកំណត់ត្រាវត្តមាន និងបញ្ជីសិស្សទាំងស្រុង`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+});
+
+// Confirmation handlers
+bot.callbackQuery('cls_req_today', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const todayStr = dayjs().format('YYYY-MM-DD');
+  const keyboard = new InlineKeyboard()
+    .text('✅ បាទ/ចាស! លុបវត្តមានថ្ងៃនេះ', 'cls_do_today')
+    .text('❌ ទេ! បោះបង់', 'clean_dismiss');
+
+  await ctx.editMessageText(
+    `⚠️ *ការបញ្ជាក់លុបទិន្នន័យ (Confirmation)*\n\n` +
+    `តើលោកគ្រូពិតជាចង់ *លុបកំណត់ត្រាវត្តមានតែថ្ងៃនេះ (${todayStr})* ចេញពី Google Sheet មែនទេ?\n` +
+    `*(កំណត់ត្រាថ្ងៃមុនៗ និងបញ្ជីឈ្មោះសិស្ស គឺមិនត្រូវបានប៉ះពាល់ឡើយ)*`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+});
+
+bot.callbackQuery('cls_req_all_att', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const keyboard = new InlineKeyboard()
+    .text('✅ បាទ/ចាស! លុបវត្តមានទាំងអស់', 'cls_do_all_att')
+    .text('❌ ទេ! បោះបង់', 'clean_dismiss');
+
+  await ctx.editMessageText(
+    `⚠️ *ការបញ្ជាក់លុបទិន្នន័យ (Confirmation)*\n\n` +
+    `តើលោកគ្រូពិតជាចង់ *លុបកំណត់ត្រាវត្តមានទាំងអស់ (All Attendance)* ចេញពី Google Sheet មែនទេ?\n` +
+    `*(បញ្ជីឈ្មោះសិស្សទាំង ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកពេញលេញដដែល)*`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+});
+
+bot.callbackQuery('cls_req_students', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const keyboard = new InlineKeyboard()
+    .text('⚠️ បាទ/ចាស! សម្អាតបញ្ជីសិស្ស', 'cls_do_students')
+    .text('❌ ទេ! បោះបង់', 'clean_dismiss');
+
+  await ctx.editMessageText(
+    `🚨 *ការបញ្ជាក់សម្អាតបញ្ជីសិស្ស (Confirmation)*\n\n` +
+    `តើលោកគ្រូពិតជាចង់ *សម្អាតបញ្ជីឈ្មោះសិស្ស (Students Sheet)* មែនទេ?\n` +
+    `*(ឈ្មោះសិស្សទាំងអស់នឹងត្រូវបានលុបចេញពី Sheet)*`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+});
+
+bot.callbackQuery('cls_req_reset_all', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const keyboard = new InlineKeyboard()
+    .text('💣 បាទ/ចាស! Reset ទាំងអស់', 'cls_do_reset_all')
+    .text('❌ ទេ! បោះបង់', 'clean_dismiss');
+
+  await ctx.editMessageText(
+    `🚨 *ការបញ្ជាក់ Reset ទិន្នន័យទាំងអស់ (Confirmation)*\n\n` +
+    `តើលោកគ្រូពិតជាចង់ *លុបទិន្នន័យទាំងអស់ (Reset Everything)* មែនទេ?\n` +
+    `*(ទាំងកំណត់ត្រាវត្តមាន និងបញ្ជីឈ្មោះសិស្ស នឹងត្រូវបានលុបចេញទាំងស្រុង)*`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+});
+
+// Execution handlers
+bot.callbackQuery('cls_do_today', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const todayStr = dayjs().format('YYYY-MM-DD');
+  await ctx.editMessageText(`⏳ *កំពុងលុបកំណត់ត្រាវត្តមានថ្ងៃនេះ (${todayStr}) ក្នុង Google Sheet...*`, {
     parse_mode: 'Markdown'
   });
+  await clearAttendanceDatabase(todayStr);
+  await ctx.editMessageText(
+    `🗑 *បានលុបកំណត់ត្រាវត្តមានថ្ងៃនេះ (${todayStr}) ជោគជ័យ!* \n\n` +
+    `✅ កំណត់ត្រាវត្តមានថ្ងៃនេះត្រូវបានលុបចេញពី Google Sheet។\n` +
+    `✅ ទិន្នន័យថ្ងៃផ្សេងៗ និងបញ្ជីឈ្មោះសិស្សនៅរក្សាទុកដដែល។`,
+    { parse_mode: 'Markdown' }
+  );
+});
 
-  const res = await clearAttendanceDatabase();
+bot.callbackQuery('cls_do_all_att', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText('⏳ *កំពុងលុបកំណត់ត្រាវត្តមានទាំងអស់ក្នុង Google Sheet...*', {
+    parse_mode: 'Markdown'
+  });
+  await clearAttendanceDatabase();
+  await ctx.editMessageText(
+    `🗑 *បានលុបកំណត់ត្រាវត្តមានទាំងអស់ជោគជ័យ! (All Attendance Cleared)*\n\n` +
+    `✅ រាល់កំណត់ត្រាវត្តមានគ្រប់ថ្ងៃត្រូវបានលុបចេញពី Google Sheet។\n` +
+    `✅ Memory Cache ក្នុង Bot ត្រូវបាន Reset។\n` +
+    `👥 បញ្ជីឈ្មោះសិស្សទាំង ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកពេញលេញ ១០០% ដដែល។`,
+    { parse_mode: 'Markdown' }
+  );
+});
 
-  const successText =
-    `🗑 *បានសម្អាតទិន្នន័យក្នុង Google Sheet ជោគជ័យ! (Sheet Cleared)*\n\n` +
-    `✅ រាល់កំណត់ត្រាវត្តមាន (Attendance Records) ក្នុង Google Sheet ត្រូវបានលុបចេញស្អាត។\n` +
-    `✅ Bot Cache & Records ត្រូវបាន Reset។\n` +
-    `👥 បញ្ជីឈ្មោះសិស្សទាំង ៤៤ នាក់ និងកាលវិភាគនៅរក្សាទុកពេញលេញ ១០០% ដដែល។\n\n` +
-    `✨ ឥឡូវនេះ លោកគ្រូ ឬប្រធានថ្នាក់ អាចចាប់ផ្តើមកត់ត្រាវត្តមានថ្មីស្រឡាងបានហើយ!`;
+bot.callbackQuery('cls_do_students', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText('⏳ *កំពុងសម្អាតបញ្ជីឈ្មោះសិស្សក្នុង Google Sheet...*', {
+    parse_mode: 'Markdown'
+  });
+  await clearStudentsDatabase();
+  await ctx.editMessageText(
+    `👥 *បានសម្អាតបញ្ជីឈ្មោះសិស្សក្នុង Google Sheet ជោគជ័យ! (Students Cleared)*\n\n` +
+    `✅ តារាងសិស្សក្នុង Google Sheet ត្រូវបានសម្អាត។\n` +
+    `👉 លោកគ្រូអាចប្រើ /addstudent ដើម្បីបញ្ចូលសិស្សថ្មីឡើងវិញ។`,
+    { parse_mode: 'Markdown' }
+  );
+});
 
-  try {
-    await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, successText, {
-      parse_mode: 'Markdown'
-    });
-  } catch (e) {
-    await ctx.reply(successText, { parse_mode: 'Markdown' });
-  }
+bot.callbackQuery('cls_do_reset_all', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText('⏳ *កំពុង Reset ទិន្នន័យទាំងអស់ក្នុង Google Sheet...*', {
+    parse_mode: 'Markdown'
+  });
+  await clearAllDatabase();
+  await ctx.editMessageText(
+    `💣 *បាន Reset ទិន្នន័យទាំងអស់ក្នុង Google Sheet ជោគជ័យ! (Reset Everything)*\n\n` +
+    `✅ រាល់កំណត់ត្រាវត្តមាន និងបញ្ជីឈ្មោះសិស្សត្រូវបានសម្អាតទាំងស្រុង។`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 // /setclearpassword command (Teacher Only)
