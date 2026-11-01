@@ -2,22 +2,26 @@
  * Google Sheet API Client for PineApple Attendance Bot
  * Connects to Google Apps Script Web App Endpoint
  */
-const { GOOGLE_SHEET_API_URL } = process.env;
+function getApiUrl() {
+  return process.env.GOOGLE_SHEET_API_URL;
+}
 
 function isGoogleSheetEnabled() {
-  return Boolean(GOOGLE_SHEET_API_URL && GOOGLE_SHEET_API_URL.startsWith('http'));
+  const url = getApiUrl();
+  return Boolean(url && url.startsWith('http'));
 }
 
 async function callGoogleSheet(action, payload = {}, params = {}) {
   if (!isGoogleSheetEnabled()) return null;
 
   try {
+    const apiUrl = getApiUrl();
     const query = new URLSearchParams({ action, ...params }).toString();
-    const url = `${GOOGLE_SHEET_API_URL}?${query}`;
+    const url = `${apiUrl}?${query}`;
 
     const options = {
       method: payload && Object.keys(payload).length > 0 ? 'POST' : 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: payload && Object.keys(payload).length > 0 ? JSON.stringify({ action, ...payload }) : undefined
     };
 
