@@ -134,7 +134,9 @@ bot.command('start', async (ctx) => {
     .text('📆 របាយការណ៍ប្រចាំខែ (Monthly)', 'cmd_monthly')
     .row()
     .text('📅 កាលវិភាគថ្ងៃនេះ', 'cmd_today')
-    .text('👥 បញ្ជីឈ្មោះសិស្ស', 'cmd_students');
+    .text('👥 បញ្ជីឈ្មោះសិស្ស', 'cmd_students')
+    .row()
+    .text('🧹 សម្អាតសារក្នុងឆាត (Clear Chat)', 'cmd_clean_menu');
 
   await ctx.reply(welcomeText, { parse_mode: 'Markdown', reply_markup: keyboard });
 });
@@ -175,6 +177,12 @@ bot.command('help', async (ctx) => {
 • \`/removestudent <លេខរៀង ឬ ឈ្មោះ>\`
 • \`/editsubject <CODE> <ឈ្មោះជាភាសាខ្មែរ>\``;
   }
+
+  helpText += `\n\n🧹 *៥. សម្អាតសារក្នុងឆាត (មិនប៉ះពាល់ទិន្នន័យ):*
+• \`/clean\` ឬ \`/clear\` - សម្អាត ៣០ សារចុងក្រោយ
+• \`/clean <ចំនួន>\` - សម្អាតតាមចំនួនកំណត់ (ឧ. \`/clean 50\`)
+• ឬចុចប៊ូតុង *[ 🧹 សម្អាតសារក្នុងឆាត ]*
+_🔒 ការសម្អាតសារ គឺលុបតែសារក្នុង Telegram ប៉ុណ្ណោះ ទិន្នន័យវត្តមាន និងសិស្សទាំងអស់ក្នុង Google Sheet / Database នៅតែមានពេញលេញ ១០០%!_`;
 
   await ctx.reply(helpText, { parse_mode: 'Markdown' });
 });
@@ -576,6 +584,90 @@ bot.command('id', async (ctx) => {
     `• *តួនាទីរបស់អ្នក:* ${isMeTeacher ? 'លោកគ្រូ (Teacher ✅)' : 'ប្រធានថ្នាក់ (Monitor)'}`,
     { parse_mode: 'Markdown' }
   );
+});
+
+// --- CHAT MESSAGE CLEANER (Does NOT touch Database / Google Sheet) ---
+async function cleanChatMessages(ctx, count = 30) {
+  const currentMsgId = ctx.message ? ctx.message.message_id : ctx.callbackQuery?.message?.message_id;
+  if (!currentMsgId) return;
+
+  const chatId = ctx.chat.id;
+  const numToDelete = Math.min(Math.max(parseInt(count, 10) || 30, 1), 100);
+
+  const messageIds = [];
+  for (let i = 0; i < numToDelete; i++) {
+    const id = currentMsgId - i;
+    if (id > 0) messageIds.push(id);
+  }
+
+  let deletedCount = 0;
+  try {
+    await ctx.api.deleteMessages(chatId, messageIds);
+    deletedCount = messageIds.length;
+  } catch (batchErr) {
+    for (const msgId of messageIds) {
+      try {
+        await ctx.api.deleteMessage(chatId, msgId);
+        deletedCount++;
+      } catch (singleErr) {}
+    }
+  }
+
+  const dismissKeyboard = new InlineKeyboard().text('🗑️ បិទការជូនដំណឹងនេះ (Dismiss)', 'clean_dismiss');
+
+  try {
+    const notice = await ctx.api.sendMessage(
+      chatId,
+      `🧹 *បានសម្អាតសារក្នុងឆាតរួចរាល់! (${deletedCount} សារ)*\n\n` +
+      `🔒 *សុវត្ថិភាពទិន្នន័យ:* ការសម្អាតនេះ គឺលុបតែសារដែលបានផ្ញើក្នុង Telegram ប៉ុណ្ណោះ។\n` +
+      `**រាល់ទិន្នន័យវត្តមាន និងឈ្មោះសិស្សក្នុង Google Sheet / Database គឺនៅរក្សាទុកពេញលេញ ១០០% មិនបាត់បង់ឡើយ!**`,
+      { parse_mode: 'Markdown', reply_markup: dismissKeyboard }
+    );
+
+    setTimeout(async () => {
+      try {
+        await ctx.api.deleteMessage(chatId, notice.message_id);
+      } catch (e) {}
+    }, 5000);
+  } catch (err) {}
+}
+
+// Commands: /clean, /clear, /clearchat
+bot.command(['clean', 'clear', 'clearchat'], async (ctx) => {
+  const parts = ctx.message.text.trim().split(/\s+/).slice(1);
+  const count = parts[0] ? parseInt(parts[0], 10) : 30;
+  await cleanChatMessages(ctx, count);
+});
+
+bot.callbackQuery('cmd_clean_menu', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const keyboard = new InlineKeyboard()
+    .text('🧹 សម្អាត ២០ សារ', 'clean_count_20')
+    .text('🧹 សម្អាត ៥០ សារ', 'clean_count_50')
+    .row()
+    .text('🧹 សម្អាត ១០០ សារ', 'clean_count_100')
+    .row()
+    .text('❌ បោះបង់ (Cancel)', 'clean_dismiss');
+
+  await ctx.reply(
+    `🧹 *ជម្រើសសម្អាតសារក្នុងឆាត (Clear Messages)*\n\n` +
+    `👉 សូមជ្រើសរើសចំនួនសារដែលលោកគ្រូចង់សម្អាត:\n\n` +
+    `🔒 *ចំណាំសំខាន់:* ការសម្អាតនេះ គឺលុបតែសារក្នុង Telegram ដើម្បីឱ្យឆាតស្រឡះស្អាតប៉ុណ្ណោះ។ **ទិន្នន័យវត្តមាន និងសិស្សទាំងអស់ក្នុង Google Sheet មិនត្រូវបានប៉ះពាល់ឡើយ!**`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  );
+});
+
+bot.callbackQuery(/^clean_count_(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const count = parseInt(ctx.match[1], 10) || 30;
+  await cleanChatMessages(ctx, count);
+});
+
+bot.callbackQuery('clean_dismiss', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {}
 });
 
 // Generate and send Excel report (STRICT TEACHER ONLY)
@@ -1146,6 +1238,13 @@ bot.on('message:text', async (ctx, next) => {
       }
     }
     return promptChooseReportDate(ctx);
+  }
+
+  // Clear chat text keywords: e.g. "clean", "clear", "សម្អាតឆាត", "លុបសារ"
+  const cleanMatch = text.match(/^(?:\/clean|\/clear|\/clearchat|clean|clear|clearchat|សម្អាត|សម្អាតឆាត|លុបសារ)(?:\s+(\d+))?$/i);
+  if (cleanMatch) {
+    const count = cleanMatch[1] ? parseInt(cleanMatch[1], 10) : 30;
+    return cleanChatMessages(ctx, count);
   }
 
   // Monthly keyword check
