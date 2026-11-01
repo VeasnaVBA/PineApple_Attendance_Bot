@@ -31,7 +31,7 @@ function doPost(e) {
 
 function handleRequest(e) {
   var lock = LockService.getScriptLock();
-  lock.tryLock(30000);
+  lock.tryLock(5000);
 
   try {
     var params = e && e.parameter ? e.parameter : {};
@@ -179,21 +179,24 @@ function recordAttendanceData(ss, payload) {
   var fullRecords = payload.fullRecords || [];
   var timestamp = new Date().toISOString();
 
-  // Delete existing records for same date + timeSlot + subject to avoid duplicate overwrites
+  // Read existing data in memory (Fast!)
   var data = s.getDataRange().getValues();
-  for (var i = data.length - 1; i >= 1; i--) {
+  var header = data.length > 0 ? data[0] : ['Date', 'TimeSlot', 'Subject', 'StudentID', 'StudentName', 'Status', 'Code', 'Note', 'RecordedBy', 'Timestamp'];
+
+  // Filter out existing records for same date + timeSlot + subject
+  var keptRows = [];
+  for (var i = 1; i < data.length; i++) {
     var rowDate = formatDateIso(data[i][0]);
     var rowTime = String(data[i][1]).trim();
     var rowSubj = String(data[i][2]).trim();
-    if (rowDate === dateStr && rowTime === timeSlot && rowSubj === subject) {
-      s.deleteRow(i + 1);
+    if (!(rowDate === dateStr && rowTime === timeSlot && rowSubj === subject)) {
+      keptRows.push(data[i]);
     }
   }
 
-  // Append new records
-  var newRows = [];
+  // Append new records to array
   fullRecords.forEach(function(rec) {
-    newRows.push([
+    keptRows.push([
       dateStr,
       timeSlot,
       subject,
@@ -207,9 +210,11 @@ function recordAttendanceData(ss, payload) {
     ]);
   });
 
-  if (newRows.length > 0) {
-    s.getRange(s.getLastRow() + 1, 1, newRows.length, 10).setValues(newRows);
-  }
+  // Fast write in a single batch
+  s.clearContents();
+  var allRows = [header].concat(keptRows);
+  s.getRange(1, 1, allRows.length, 10).setValues(allRows);
+  s.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
 }
 
 function getAttendanceData(ss, singleDate, startDate, endDate) {
@@ -305,27 +310,35 @@ function saveSubjectsData(ss, subjects) {
 function clearAttendanceData(ss, targetDate) {
   var s = ss.getSheetByName('Attendance');
   if (!s) return;
+  var lastRow = s.getLastRow();
+  if (lastRow <= 1) return;
+
   if (targetDate) {
     var data = s.getDataRange().getValues();
-    for (var i = data.length - 1; i >= 1; i--) {
+    var header = data[0];
+    var keptRows = [];
+    for (var i = 1; i < data.length; i++) {
       var rowDate = formatDateIso(data[i][0]);
-      if (rowDate === targetDate) {
-        s.deleteRow(i + 1);
+      if (rowDate !== targetDate) {
+        keptRows.push(data[i]);
       }
     }
-  } else {
     s.clearContents();
-    s.appendRow(['Date', 'TimeSlot', 'Subject', 'StudentID', 'StudentName', 'Status', 'Code', 'Note', 'RecordedBy', 'Timestamp']);
+    var allRows = [header].concat(keptRows);
+    s.getRange(1, 1, allRows.length, 10).setValues(allRows);
     s.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  } else {
+    // Ultra fast: clear rows 2 to lastRow in one single call without touching headers
+    s.getRange(2, 1, lastRow - 1, 10).clearContent();
   }
 }
 
 function clearStudentsSheet(ss) {
   var s = ss.getSheetByName('Students');
-  if (s) {
-    s.clearContents();
-    s.appendRow(['No', 'ID', 'Name', 'Gender', 'DOB']);
-    s.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  if (!s) return;
+  var lastRow = s.getLastRow();
+  if (lastRow > 1) {
+    s.getRange(2, 1, lastRow - 1, 5).clearContent();
   }
 }
 
@@ -333,5 +346,6 @@ function clearAllSheetData(ss) {
   clearAttendanceData(ss);
   clearStudentsSheet(ss);
 }
+
 
 
