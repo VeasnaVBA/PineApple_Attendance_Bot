@@ -3,6 +3,33 @@ const path = require('path');
 const dayjs = require('dayjs');
 const { TEMP_DIR, CLASS_NAME, TEACHER_NAME } = require('./config');
 
+const FONT_FAMILY = 'Khmer OS Siemreap';
+const BASE_FONT_SIZE = 10;
+
+/**
+ * Ensures all cells across all worksheets in the workbook use Khmer OS Siemreap font and size 10.
+ */
+function applyKhmerFontToWorkbook(workbook) {
+  workbook.eachSheet((worksheet) => {
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const existingFont = cell.font || {};
+        const isTitle = rowNumber === 1;
+        const isKpiVal = existingFont.size && existingFont.size >= 14;
+
+        cell.font = {
+          name: FONT_FAMILY,
+          size: isTitle ? 14 : (isKpiVal ? 12 : BASE_FONT_SIZE),
+          bold: existingFont.bold !== undefined ? existingFont.bold : false,
+          italic: existingFont.italic || false,
+          underline: existingFont.underline || false,
+          color: existingFont.color || undefined
+        };
+      });
+    });
+  });
+}
+
 /**
  * Generates an Excel report for a SINGLE subject session.
  */
@@ -21,7 +48,6 @@ async function generateAttendanceExcel({ dateStr, subject, timeSlot, summary, re
   const THEME_HEADER_FILL = '1F4E78';
   const THEME_HEADER_TEXT = 'FFFFFF';
   const BORDER_COLOR = 'D9D9D9';
-  const FONT_FAMILY = 'Calibri';
 
   // Title Row
   worksheet.mergeCells('A1:G1');
@@ -179,6 +205,7 @@ async function generateAttendanceExcel({ dateStr, subject, timeSlot, summary, re
   const filename = `Attendance_${safeSubjFile}_${dateStr}.xlsx`;
   const filePath = path.join(TEMP_DIR, filename);
 
+  applyKhmerFontToWorkbook(workbook);
   await workbook.xlsx.writeFile(filePath);
   return { filePath, filename };
 }
@@ -198,7 +225,6 @@ async function generateFullDayExcel(dayStatus) {
 
   const THEME_HEADER_FILL = '1F4E78';
   const BORDER_COLOR = 'D9D9D9';
-  const FONT_FAMILY = 'Calibri';
 
   // 1. MASTER SUMMARY SHEET
   const matrixSheet = workbook.addWorksheet('តារាងរួមប្រចាំថ្ងៃ', {
@@ -497,6 +523,7 @@ async function generateFullDayExcel(dayStatus) {
   const filename = `Attendance_FullDay_${dayStatus.dayName}_${dateStr}.xlsx`;
   const filePath = path.join(TEMP_DIR, filename);
 
+  applyKhmerFontToWorkbook(workbook);
   await workbook.xlsx.writeFile(filePath);
   return { filePath, filename };
 }
@@ -528,7 +555,6 @@ async function generateRangeExcelReport(rangeData) {
 
   const THEME_HEADER_FILL = '1F4E78';
   const BORDER_COLOR = 'D9D9D9';
-  const FONT_FAMILY = 'Calibri';
 
   // --- SHEET 1: សង្ខេបប្រចាំខែ (MONTHLY SUMMARY & RANKING) ---
   const summarySheet = workbook.addWorksheet('សង្ខេបប្រចាំខែ', {
@@ -905,6 +931,7 @@ async function generateRangeExcelReport(rangeData) {
   }
   const filePath = path.join(TEMP_DIR, filename);
 
+  applyKhmerFontToWorkbook(workbook);
   await workbook.xlsx.writeFile(filePath);
   return { filePath, filename };
 }
