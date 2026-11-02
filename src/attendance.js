@@ -237,6 +237,22 @@ function cleanTimeSlot(str) {
   return s;
 }
 
+function normalizeTimeSlot(str) {
+  if (!str) return '';
+  const s = cleanTimeSlot(str);
+  const m = s.match(/(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})/);
+  if (m) {
+    const start = m[1].padStart(5, '0');
+    const end = m[2].padStart(5, '0');
+    return `${start} - ${end}`;
+  }
+  const single = s.match(/(\d{1,2}:\d{2})/);
+  if (single) {
+    return single[1].padStart(5, '0');
+  }
+  return s.trim();
+}
+
 // Fetch all latest attendance records from Google Sheet and update cache & local files
 async function syncFromGoogleSheet() {
   if (!isGoogleSheetEnabled()) return;
@@ -254,12 +270,12 @@ async function syncFromGoogleSheet() {
       if (!dateGroups[dStr]) dateGroups[dStr] = {};
 
       const rawSlot = cleanTimeSlot(r.timeSlot);
-      const slotKey = rawSlot || r.subject;
+      const slotKey = normalizeTimeSlot(rawSlot) || rawSlot || r.subject;
       if (!dateGroups[dStr][slotKey]) {
         dateGroups[dStr][slotKey] = {
           date: dStr,
           subject: r.subject,
-          timeSlot: rawSlot,
+          timeSlot: slotKey,
           recordedBy: r.recordedBy || 'ប្រធានថ្នាក់',
           records: []
         };
@@ -296,7 +312,6 @@ async function syncFromGoogleSheet() {
           summary
         };
         daily[slotKey] = recordObj;
-        daily[sess.subject] = recordObj;
       }
       saveDailyRecords(dStr, daily);
     }
@@ -313,8 +328,9 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
   const students = getStudents();
   const daily = getDailyRecords(dateStr);
 
-  const slotKey = timeSlot ? timeSlot.trim() : subject;
-  const existingSubjectRecord = daily[slotKey] || daily[subject] || {
+  const normSlot = normalizeTimeSlot(timeSlot);
+  const slotKey = normSlot || (timeSlot ? timeSlot.trim() : subject);
+  const existingSubjectRecord = daily[slotKey] || (timeSlot ? daily[timeSlot.trim()] : null) || {
     date: dateStr,
     subject,
     timeSlot: timeSlot || 'Class Time',
@@ -419,9 +435,11 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
     records: fullRecords
   };
 
-  // Key by timeSlot so multiple sessions of the same subject on the same day don't overwrite
+  // Key strictly by timeSlot so multiple sessions of the same subject on the same day don't overwrite each other
   daily[slotKey] = updatedSubjectRecord;
-  daily[subject] = updatedSubjectRecord; // fallback reference
+  if (timeSlot && timeSlot.trim() !== slotKey) {
+    daily[timeSlot.trim()] = updatedSubjectRecord;
+  }
   saveDailyRecords(dateStr, daily);
 
   // Sync to Google Sheet if configured
@@ -502,29 +520,23 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
   const matchedRecs = new Set();
   const sessions = slots.map((slot, idx) => {
     const slotTime = `${slot.start} - ${slot.end}`;
-    // 1. Strict match by slotTime (e.g. "07:00 - 08:00")
-    let rec = daily[slotTime] || daily[`${slot.start}-${slot.end}`];
+    const normSlot = normalizeTimeSlot(slotTime);
 
-    // 2. If not found, match by slotTime in record object
+    // 1. Strict match by normalized slotTime, raw slotTime, or slot.start-slot.end
+    let rec = daily[normSlot] || daily[slotTime] || daily[`${slot.start}-${slot.end}`];
+
+    // 2. If not found, match by timeSlot inside the record object
     if (!rec) {
       const foundKey = Object.keys(daily).find(k => {
         const item = daily[k];
-        const itemSlot = cleanTimeSlot(item ? item.timeSlot : '');
-        return item && (itemSlot === slotTime || itemSlot === `${slot.start} - ${slot.end}` || itemSlot === slot.start);
+        if (!item || matchedRecs.has(item)) return false;
+        const itemNorm = normalizeTimeSlot(item.timeSlot || k);
+        return itemNorm === normSlot || itemNorm === slot.start || item.timeSlot === slotTime;
       });
       if (foundKey) rec = daily[foundKey];
     }
 
-    // 3. Fallback match by subject ONLY IF candidate record does not belong to another scheduled slotTime
-    if (!rec && daily[slot.subject]) {
-      const candidate = daily[slot.subject];
-      const candSlot = cleanTimeSlot(candidate.timeSlot);
-      if (!candSlot || candSlot === slotTime || !slots.some(s => `${s.start} - ${s.end}` === candSlot)) {
-        rec = candidate;
-      }
-    }
-
-    if (rec && rec.records && rec.records.length > 0) {
+    if (rec && rec.records && rec.records.length > 0 && !matchedRecs.has(rec)) {
       matchedRecs.add(rec);
       return {
         sessionNo: idx + 1,
@@ -814,7 +826,9 @@ module.exports = {
   getRangeAttendanceStatus,
   clearAttendanceDatabase,
   clearStudentsDatabase,
-  clearAllDatabase
+  clearAllDatabase,
+  cleanTimeSlot,
+  normalizeTimeSlot
 };
 
 

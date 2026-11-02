@@ -37,7 +37,8 @@ const {
   getRangeAttendanceStatus,
   clearAttendanceDatabase,
   clearStudentsDatabase,
-  clearAllDatabase
+  clearAllDatabase,
+  normalizeTimeSlot
 } = require('./attendance');
 
 const {
@@ -330,14 +331,13 @@ bot.callbackQuery(/^rec_date_(.+)$/, async (ctx) => {
   const keyboard = new InlineKeyboard();
 
   if (slots.length > 0) {
-    slots.forEach(slot => {
+    slots.forEach((slot, idx) => {
       const slotTime = `${slot.start} - ${slot.end}`;
-      const matchedSess = dayStatus.scheduledSessions.find(s => {
-        const st = s.timeSlot;
-        return (st === slotTime || st === `${slot.start}-${slot.end}` || st === slot.start || s.subject === slot.subject) && s.isRecorded;
-      });
+      const normSlot = normalizeTimeSlot(slotTime);
+      const matchedSess = (dayStatus.scheduledSessions && dayStatus.scheduledSessions[idx]) ||
+        dayStatus.scheduledSessions.find(s => normalizeTimeSlot(s.timeSlot) === normSlot);
 
-      if (matchedSess) {
+      if (matchedSess && matchedSess.isRecorded) {
         const sum = matchedSess.summary || {};
         let noteStr = '✅ បានកត់រួច';
         if (sum.absent > 0 || sum.permission > 0 || sum.late > 0) {
@@ -427,7 +427,8 @@ bot.callbackQuery(/^rec_slot_([^_]+)_([^_]+)_(.+)$/, async (ctx) => {
   // Check if slot has existing record
   const daily = getDailyRecords(dateStr);
   const slotTime = `${startTime} - ${endTime}`;
-  const existingRecord = daily[slotTime] || daily[`${startTime}-${endTime}`] || daily[subject];
+  const normSlot = normalizeTimeSlot(slotTime);
+  const existingRecord = daily[normSlot] || daily[slotTime] || daily[`${startTime}-${endTime}`];
   const isRecorded = existingRecord && Array.isArray(existingRecord.records) && existingRecord.records.length > 0;
 
   let statusBanner = '';
