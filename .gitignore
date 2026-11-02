@@ -1,6 +1,7 @@
 node_modules/
 temp/
 .env
+data/records/
 .DS_Store
 Thumbs.db
 npm-debug.log*

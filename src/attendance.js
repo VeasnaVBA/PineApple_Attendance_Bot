@@ -188,6 +188,7 @@ function parseAttendanceInput(text) {
 
 // In-memory cache for daily records across requests
 const memoryDailyRecords = new Map();
+let hasSyncedFromGoogleSheet = false;
 
 function normalizeDateStr(raw) {
   if (!raw) return '';
@@ -203,6 +204,11 @@ function getRecordFilePath(dateStr) {
 function getDailyRecords(dateStr) {
   if (memoryDailyRecords.has(dateStr)) {
     return memoryDailyRecords.get(dateStr);
+  }
+  // When Google Sheet integration is active and has synced, Google Sheet is the sole source of truth.
+  // If dateStr is not in memoryDailyRecords, it means Google Sheet has no records for this date.
+  if (isGoogleSheetEnabled() && hasSyncedFromGoogleSheet) {
+    return {};
   }
   const filePath = getRecordFilePath(dateStr);
   if (fs.existsSync(filePath)) {
@@ -259,7 +265,15 @@ async function syncFromGoogleSheet() {
 
   try {
     const gs = await callGoogleSheet('getAttendance');
-    if (!gs || !Array.isArray(gs.records) || gs.records.length === 0) return;
+    if (!gs || !Array.isArray(gs.records)) return;
+
+    hasSyncedFromGoogleSheet = true;
+    // Reset in-memory cache with fresh data from Google Sheet (single source of truth)
+    memoryDailyRecords.clear();
+
+    if (gs.records.length === 0) {
+      return;
+    }
 
     const students = getStudents();
     const dateGroups = {};
@@ -297,7 +311,7 @@ async function syncFromGoogleSheet() {
     });
 
     for (const [dStr, sessions] of Object.entries(dateGroups)) {
-      const daily = getDailyRecords(dStr) || {};
+      const daily = {};
       for (const [slotKey, sess] of Object.entries(sessions)) {
         const records = sess.records;
         const summary = {
@@ -733,7 +747,8 @@ async function clearAttendanceDatabase(targetDate = null) {
     }
   }
 
-  // Clear in-memory cache
+  // Clear in-memory cache and mark synced
+  hasSyncedFromGoogleSheet = true;
   if (targetDate) {
     if (typeof memoryDailyRecords.delete === 'function') {
       memoryDailyRecords.delete(targetDate);
