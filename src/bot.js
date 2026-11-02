@@ -9,10 +9,14 @@ const {
   TEACHER_NAME,
   getTeacherId,
   setTeacherId,
+  getTeacherName,
+  setTeacherName,
   getClearPassword,
   setClearPassword,
   getSettings
 } = require('./config');
+
+const { isGoogleSheetEnabled, callGoogleSheet } = require('./googleSheet');
 
 const {
   getCurrentSlot,
@@ -71,7 +75,9 @@ function checkIsTeacher(ctx) {
 bot.command('setteacher', async (ctx) => {
   const currentTeacherId = getTeacherId();
   const callerId = String(ctx.from.id);
-  const callerName = ctx.from.first_name || 'លោកគ្រូ';
+  const parts = ctx.message.text.trim().split(/\s+/).slice(1);
+  const customName = parts.join(' ').trim();
+  const callerName = customName || ctx.from.first_name || 'លោកគ្រូ';
 
   if (currentTeacherId && currentTeacherId !== callerId) {
     return ctx.reply('⚠️ លោកគ្រូបន្ទុកថ្នាក់ត្រូវបានកំណត់រួចហើយ។ មិនអាចផ្លាស់ប្តូរបានទេ!');
@@ -85,8 +91,45 @@ bot.command('setteacher', async (ctx) => {
     `🔒 ចាប់ពីពេលនេះទៅ មានតែលោកគ្រូប៉ុណ្ណោះដែលអាច:\n` +
     `• ទាញយករបាយការណ៍ Excel (/attendance)\n` +
     `• បន្ថែម/កែប្រែ/លុបសិស្ស (/addstudent, /updatestudent, /removestudent)\n` +
-    `• កែសម្រួលឈ្មោះមុខវិជ្ជា (/editsubject)\n\n` +
+    `• កែសម្រួលឈ្មោះមុខវិជ្ជា (/editsubject)\n` +
+    `• ប្តូរឈ្មោះលោកគ្រូ (/setteachername <ឈ្មោះ>)\n\n` +
     `👉 ប្រធានថ្នាក់អាចធ្វើបានតែមួយគត់ គឺ *កត់ត្រាវត្តមាន*!`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// /setteachername command
+bot.command(['setteachername', 'teachername'], async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិកែប្រែឈ្មោះគ្រូបន្ទុកថ្នាក់ គឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+  const parts = ctx.message.text.trim().split(/\s+/).slice(1);
+  const newName = parts.join(' ').trim();
+
+  if (!newName) {
+    return ctx.reply(
+      `👨‍🏫 *ការកំណត់ឈ្មោះគ្រូបន្ទុកថ្នាក់ (Teacher Name)*\n\n` +
+      `ឈ្មោះបច្ចុប្បន្ន: *${TEACHER_NAME}*\n\n` +
+      `👉 ដើម្បីប្តូរឈ្មោះ សូមវាយ:\n` +
+      `\`/setteachername <ឈ្មោះថ្មី>\`\n\n` +
+      `*ឧទាហរណ៍:*\n` +
+      `\`/setteachername សក់ វាសនា\`\n` +
+      `\`/setteachername លោកគ្រូ សក់ វាសនា\``,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  setTeacherName(newName);
+  if (isGoogleSheetEnabled()) {
+    try {
+      await callGoogleSheet('saveSettings', { settings: { teacherName: newName } });
+    } catch (e) {}
+  }
+
+  await ctx.reply(
+    `✅ *បានផ្លាស់ប្តូរឈ្មោះគ្រូបន្ទុកថ្នាក់ជោគជ័យ!*\n\n` +
+    `👨‍🏫 *ឈ្មោះថ្មី:* *${newName}*\n\n` +
+    `📌 ឈ្មោះនេះនឹងបង្ហាញលើគ្រប់របាយការណ៍ Excel ទាំងអស់ចាប់ពីពេលនេះតទៅ!`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -104,7 +147,8 @@ bot.command('teacher', async (ctx) => {
     `👨‍🏫 *ព័ត៌មានគ្រូបន្ទុកថ្នាក់:*\n` +
     `• ឈ្មោះ: *${TEACHER_NAME}*\n` +
     `• User ID: \`${teacherId}\`\n` +
-    `• តួនាទីរបស់អ្នក: *${isMe ? 'លោកគ្រូ (Teacher ✅)' : 'ប្រធានថ្នាក់ (Class Monitor)'}*`,
+    `• តួនាទីរបស់អ្នក: *${isMe ? 'លោកគ្រូ (Teacher ✅)' : 'ប្រធានថ្នាក់ (Class Monitor)'}*\n\n` +
+    `💡 _លោកគ្រូអាចប្តូរឈ្មោះបានជានិច្ចដោយវាយ: \`/setteachername <ឈ្មោះថ្មី>\`_`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -181,7 +225,8 @@ bot.command('help', async (ctx) => {
 • \`/addstudent <លេខរៀង> <ឈ្មោះ> <ភេទ> [ថ្ងៃខែឆ្នាំកំណើត]\`
 • \`/updatestudent <លេខរៀង> <ឈ្មោះកែសម្រួល>\`
 • \`/removestudent <លេខរៀង ឬ ឈ្មោះ>\`
-• \`/editsubject <CODE> <ឈ្មោះជាភាសាខ្មែរ>\``;
+• \`/editsubject <CODE> <ឈ្មោះជាភាសាខ្មែរ>\`
+• \`/setteachername <ឈ្មោះថ្មី>\` - កែប្រែឈ្មោះគ្រូបន្ទុកថ្នាក់លើរបាយការណ៍ Excel`;
   }
 
   helpText += `\n\n🧹 *៥. សម្អាតសារក្នុងឆាត (មិនប៉ះពាល់ទិន្នន័យ):*

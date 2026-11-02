@@ -70,6 +70,18 @@ function setTeacherId(id, name) {
   return s;
 }
 
+function getTeacherName() {
+  const s = getSettings();
+  return s.teacherName || process.env.TEACHER_NAME || 'សក់ វាសនា';
+}
+
+function setTeacherName(name) {
+  const s = getSettings();
+  s.teacherName = String(name).trim();
+  saveSettings(s);
+  return s.teacherName;
+}
+
 function getClearPassword() {
   const s = getSettings();
   return s.clearPassword || process.env.CLEAR_DATA_PASSWORD || 'pineapple123';
@@ -95,9 +107,11 @@ module.exports = {
   saveSettings,
   getTeacherId,
   setTeacherId,
+  getTeacherName,
+  setTeacherName,
   getClearPassword,
   setClearPassword,
   get CLASS_NAME() { return getSettings().className; },
-  get TEACHER_NAME() { return getSettings().teacherName; }
+  get TEACHER_NAME() { return getTeacherName(); }
 };
 
