@@ -30,6 +30,7 @@ const {
 
 const {
   getStudents,
+  saveStudents,
   searchStudents,
   addStudent,
   updateStudent,
@@ -42,7 +43,8 @@ const {
   clearAttendanceDatabase,
   clearStudentsDatabase,
   clearAllDatabase,
-  normalizeTimeSlot
+  normalizeTimeSlot,
+  syncFromGoogleSheet
 } = require('./attendance');
 
 const {
@@ -245,9 +247,19 @@ _🔒 ការសម្អាតសារ គឺលុបតែសារក្�
 
 // /students command
 bot.command('students', async (ctx) => {
+  if (isGoogleSheetEnabled()) {
+    await syncFromGoogleSheet();
+  }
   const students = getStudents();
   if (students.length === 0) {
-    return ctx.reply('មិនទាន់មានទិន្នន័យសិស្សនៅឡើយទេ។');
+    return ctx.reply(
+      '⚠️ *មិនទាន់មានទិន្នន័យសិស្សនៅឡើយទេ (០ នាក់)!*\n\n' +
+      '👉 *របៀបបញ្ចូលឈ្មោះសិស្ស:*\n' +
+      '1️⃣ បើក **Google Sheet** ➡️ ចូលសន្លឹក **"Students"** ➡️ បញ្ចូលឈ្មោះសិស្ស (No, ID, Name, Gender, DOB)\n' +
+      '2️⃣ ឬវាយពាក្យបញ្ជាក្នុង Bot: `/addstudent <លេខរៀង> <ឈ្មោះ> <ភេទ>`\n' +
+      '3️⃣ ឬប្រសិនបើលោកគ្រូចង់ទាញយកបញ្ជីសិស្សគំរូ ៣០ នាក់មកវិញ សូមវាយ: `/restorestudents`',
+      { parse_mode: 'Markdown' }
+    );
   }
 
   let text = `👥 *បញ្ជីឈ្មោះសិស្ស (${students.length} នាក់) - ${CLASS_NAME}:*\n\n`;
@@ -257,6 +269,56 @@ bot.command('students', async (ctx) => {
   });
 
   await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+// /restorestudents command (for Teacher to restore sample roster to Google Sheet)
+bot.command('restorestudents', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិនេះសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+  const defaultStudents = [
+    { id: '01', name: 'ខា សិនហួ', gender: 'ប្រុស', dob: '02/01/2012' },
+    { id: '02', name: 'ខេង គឹមឡាង', gender: 'ស្រី', dob: '07/01/2011' },
+    { id: '03', name: 'ចំណាន លីនតុន', gender: 'ប្រុស', dob: '11/05/2012' },
+    { id: '04', name: 'ឆោម ចិន', gender: 'ស្រី', dob: '25/06/2010' },
+    { id: '05', name: 'ជួប តុនកែវ', gender: 'ស្រី', dob: '27/06/2012' },
+    { id: '06', name: 'ឌៀម រតនវិសាល', gender: 'ប្រុស', dob: '06/10/2011' },
+    { id: '07', name: 'ទេពមិន មុនីន', gender: 'ប្រុស', dob: '07/01/2012' },
+    { id: '08', name: 'បូរី រស្មី', gender: 'ប្រុស', dob: '29/05/2012' },
+    { id: '09', name: 'ផល្លា សូភីដានី', gender: 'ស្រី', dob: '13/01/2013' },
+    { id: '10', name: 'ផាត សុផាន់ណា', gender: 'ស្រី', dob: '21/01/2011' },
+    { id: '11', name: 'ផោន សុភ័ក្ត្រវឌ្ឍនា', gender: 'ស្រី', dob: '18/10/2012' },
+    { id: '12', name: 'ភាន សុបញ្ញា', gender: 'ស្រី', dob: '02/08/2011' },
+    { id: '13', name: 'យ៉ាំ សុធីម', gender: 'ស្រី', dob: '18/11/2011' },
+    { id: '14', name: 'យ៉ុក ខិត្តាយ៉ា', gender: 'ស្រី', dob: '07/11/2011' },
+    { id: '15', name: 'យ៉េត ករុណា', gender: 'ប្រុស', dob: '27/01/2013' },
+    { id: '16', name: 'យុតពិសិដ្ឋសុគន្ធ សក្ខណា', gender: 'ស្រី', dob: '28/01/2012' },
+    { id: '17', name: 'រិន រតនា', gender: 'ស្រី', dob: '29/06/2010' },
+    { id: '18', name: 'រីម សុភ័ក្ត្រា', gender: 'ស្រី', dob: '09/04/2012' },
+    { id: '19', name: 'លាង ហ៊ីយឡាង', gender: 'ស្រី', dob: '03/04/2012' },
+    { id: '20', name: 'ស្រ៊ិន ពៅម៉ូនីកា', gender: 'ស្រី', dob: '11/01/2012' },
+    { id: '21', name: 'សាន្ត សុខហែម', gender: 'ស្រី', dob: '18/11/2011' },
+    { id: '22', name: 'សុជាតិ ហាណា', gender: 'ស្រី', dob: '31/01/2011' },
+    { id: '23', name: 'សុក័ក្ត្រ ដាវីយ៉ា', gender: 'ស្រី', dob: '14/09/2011' },
+    { id: '24', name: 'សួស្តី ឧស្សាហ៍', gender: 'ប្រុស', dob: '06/02/2012' },
+    { id: '25', name: 'សៀង ចរិយា', gender: 'ស្រី', dob: '13/04/2011' },
+    { id: '26', name: 'ហិន ដាលីស', gender: 'ស្រី', dob: '04/12/2012' },
+    { id: '27', name: 'ហុង សុខជាង', gender: 'ប្រុស', dob: '22/07/2011' },
+    { id: '28', name: 'ហេង ធាក់ទិន', gender: 'ប្រុស', dob: '27/02/2012' },
+    { id: '29', name: 'ហេង ប៊ុនលាភ', gender: 'ប្រុស', dob: '07/03/2011' },
+    { id: '30', name: 'ឡុង វិសិដ្ឋ', gender: 'ប្រុស', dob: '15/08/2012' }
+  ];
+
+  saveStudents(defaultStudents);
+  if (isGoogleSheetEnabled()) {
+    try {
+      await callGoogleSheet('saveStudents', { students: defaultStudents });
+    } catch (e) {}
+  }
+  await ctx.reply(
+    `✅ *បានទាញយក និងរក្សាទុកបញ្ជីសិស្សគំរូ ៣០ នាក់ចូល Google Sheet រួចរាល់ហើយ!*`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 // /find or /search command
@@ -1682,6 +1744,18 @@ bot.on('message:text', async (ctx, next) => {
       recordedBy,
       parsedItems
     });
+
+    if (result.status === 'no_students') {
+      return ctx.reply(
+        `⚠️ *បច្ចុប្បន្នមិនទាន់មានឈ្មោះសិស្សក្នុងប្រព័ន្ធទេ (០ នាក់)!*\n\n` +
+        `ដោយសារលោកគ្រូបាន Reset / Clear ទិន្នន័យបញ្ជីសិស្សក្នុង Google Sheet រួចរាល់ ដូច្នេះមិនទាន់អាចកត់ត្រាវត្តមានបានឡើយ។\n\n` +
+        `👉 *ដើម្បីចាប់ផ្តើមកត់វត្តមាន សូមលោកគ្រូ:*\n` +
+        `1️⃣ បើក **Google Sheet** ➡️ ចូលសន្លឹក **"Students"** ➡️ បញ្ចូលឈ្មោះសិស្សពិតប្រាកដ (No, ID, Name, Gender, DOB)\n` +
+        `2️⃣ ឬវាយពាក្យបញ្ជាក្នុង Bot: \`/addstudent <លេខរៀង> <ឈ្មោះ> <ភេទ>\`\n` +
+        `3️⃣ ឬប្រសិនបើលោកគ្រូចង់ទាញយកបញ្ជីសិស្សគំរូ ៣០ នាក់មកវិញ សូមវាយ: \`/restorestudents\``,
+        { parse_mode: 'Markdown' }
+      );
+    }
 
     const sum = result.summary;
     let replyMsg =

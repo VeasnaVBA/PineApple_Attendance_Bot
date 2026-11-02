@@ -4,11 +4,23 @@ const dayjs = require('dayjs');
 const { readJson, writeJson, RECORDS_DIR } = require('./config');
 const { isGoogleSheetEnabled, callGoogleSheet } = require('./googleSheet');
 
+let memoryStudents = null;
+let hasSyncedStudentsFromGoogleSheet = false;
+
 function getStudents() {
-  return readJson('students.json', []);
+  if (Array.isArray(memoryStudents)) {
+    return memoryStudents;
+  }
+  if (isGoogleSheetEnabled() && hasSyncedStudentsFromGoogleSheet) {
+    return [];
+  }
+  const fileData = readJson('students.json', []);
+  memoryStudents = fileData;
+  return memoryStudents;
 }
 
 function saveStudents(students) {
+  memoryStudents = students;
   writeJson('students.json', students);
 }
 
@@ -259,11 +271,19 @@ function normalizeTimeSlot(str) {
   return s.trim();
 }
 
-// Fetch all latest attendance records from Google Sheet and update cache & local files
+// Fetch all latest attendance records and students from Google Sheet and update cache & local files
 async function syncFromGoogleSheet() {
   if (!isGoogleSheetEnabled()) return;
 
   try {
+    // 1. Sync students from Google Sheet (single source of truth for student roster)
+    const sRes = await callGoogleSheet('getStudents');
+    if (sRes && Array.isArray(sRes.students)) {
+      hasSyncedStudentsFromGoogleSheet = true;
+      memoryStudents = sRes.students;
+    }
+
+    // 2. Sync attendance records from Google Sheet
     const gs = await callGoogleSheet('getAttendance');
     if (!gs || !Array.isArray(gs.records)) return;
 
@@ -339,7 +359,20 @@ async function syncFromGoogleSheet() {
  * All registered students not in parsedItems default to Present!
  */
 async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems }) {
+  if (isGoogleSheetEnabled()) {
+    await syncFromGoogleSheet();
+  }
   const students = getStudents();
+
+  if (students.length === 0) {
+    return {
+      status: 'no_students',
+      summary: { total: 0, present: 0, absent: 0, permission: 0, late: 0 },
+      matchedCount: 0,
+      notFoundNames: (parsedItems || []).map(p => p.rawName)
+    };
+  }
+
   const daily = getDailyRecords(dateStr);
 
   const normSlot = normalizeTimeSlot(timeSlot);
@@ -792,6 +825,8 @@ async function clearStudentsDatabase() {
       sheetResult = { status: 'error', message: err.message };
     }
   }
+  hasSyncedStudentsFromGoogleSheet = true;
+  memoryStudents = [];
   saveStudents([]);
   return sheetResult || { status: 'success' };
 }
@@ -806,9 +841,12 @@ async function clearAllDatabase() {
       sheetResult = { status: 'error', message: err.message };
     }
   }
+  hasSyncedFromGoogleSheet = true;
+  hasSyncedStudentsFromGoogleSheet = true;
   if (typeof memoryDailyRecords.clear === 'function') {
     memoryDailyRecords.clear();
   }
+  memoryStudents = [];
   saveStudents([]);
   try {
     if (fs.existsSync(RECORDS_DIR)) {
@@ -843,7 +881,8 @@ module.exports = {
   clearStudentsDatabase,
   clearAllDatabase,
   cleanTimeSlot,
-  normalizeTimeSlot
+  normalizeTimeSlot,
+  syncFromGoogleSheet
 };
 
 
