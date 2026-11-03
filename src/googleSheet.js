@@ -45,6 +45,9 @@ async function syncLocalToGoogleSheet(students, timetable, subjects) {
   if (students && students.length > 0) {
     await callGoogleSheet('saveStudents', { students });
   }
+  if (timetable && timetable.length > 0) {
+    await callGoogleSheet('saveTimetable', { timetable });
+  }
   if (subjects && Object.keys(subjects).length > 0) {
     await callGoogleSheet('saveSubjects', { subjects });
   }

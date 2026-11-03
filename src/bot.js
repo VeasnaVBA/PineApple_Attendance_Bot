@@ -22,6 +22,8 @@ const {
   getCurrentSlot,
   getTodaySlots,
   getTimetable,
+  saveTimetable,
+  syncTimetableFromGoogleSheet,
   getSubjectsDict,
   updateSubjectName,
   DAYS,
@@ -588,6 +590,9 @@ bot.callbackQuery('rec_cancel', async (ctx) => {
 
 // /today command
 bot.command('today', async (ctx) => {
+  if (isGoogleSheetEnabled()) {
+    await syncTimetableFromGoogleSheet();
+  }
   const now = dayjs();
   const dayName = DAYS[now.day()];
   const khmerDay = KHMER_DAYS[dayName];
@@ -615,6 +620,9 @@ bot.command('today', async (ctx) => {
 
 // /timetable command
 bot.command('timetable', async (ctx) => {
+  if (isGoogleSheetEnabled()) {
+    await syncTimetableFromGoogleSheet();
+  }
   const timetable = getTimetable();
   if (timetable.length === 0) {
     return ctx.reply('មិនទាន់មានកាលវិភាគនៅឡើយទេ។');
@@ -637,7 +645,34 @@ bot.command('timetable', async (ctx) => {
     }
   }
 
+  text += `\n💡 *ចំណាំ:* លោកគ្រូអាចកែប្រែកាលវិភាគនេះដោយផ្ទាល់ក្នុងសន្លឹក **"Timetable"** ក្នុង Google Sheet បានគ្រប់ពេលវេលា!`;
+
   await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+// /synctimetable command
+bot.command('synctimetable', async (ctx) => {
+  await syncTimetableFromGoogleSheet();
+  const timetable = getTimetable();
+  await ctx.reply(`✅ *បានទាញយក និងធ្វើបច្ចុប្បន្នភាពកាលវិភាគពី Google Sheet រួចរាល់!* (សរុប ${timetable.length} ម៉ោងសិក្សា)`, { parse_mode: 'Markdown' });
+});
+
+// /restoretimetable command (Teacher only)
+bot.command('restoretimetable', async (ctx) => {
+  if (!checkIsTeacher(ctx)) {
+    return ctx.reply('⚠️ សិទ្ធិនេះគឺសម្រាប់តែលោកគ្រូប៉ុណ្ណោះ!');
+  }
+  const defaultTimetable = readJson('timetable.json', []);
+  saveTimetable(defaultTimetable);
+  if (isGoogleSheetEnabled()) {
+    try {
+      await callGoogleSheet('saveTimetable', { timetable: defaultTimetable });
+    } catch (e) {}
+  }
+  await ctx.reply(
+    `✅ *បានបញ្ចូលកាលវិភាគគំរូ ចូល Google Sheet ឡើងវិញដោយជោគជ័យ!* (សរុប ${defaultTimetable.length} ម៉ោង)`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 // /subjects command
@@ -670,7 +705,7 @@ bot.command('editsubject', async (ctx) => {
   const code = parts[0].toUpperCase();
   const newName = parts.slice(1).join(' ').trim();
 
-  updateSubjectName(code, newName);
+  await updateSubjectName(code, newName);
   await ctx.reply(`✅ បានកែសម្រួលមុខវិជ្ជាកូដ \`${code}\` ទៅជា: *${newName}* ដោយជោគជ័យ!`, {
     parse_mode: 'Markdown'
   });

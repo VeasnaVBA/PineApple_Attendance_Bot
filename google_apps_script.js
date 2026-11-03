@@ -72,6 +72,11 @@ function handleRequest(e) {
     } else if (action === 'saveSubjects') {
       saveSubjectsData(ss, postData.subjects || {});
       result.message = 'Subjects saved successfully';
+    } else if (action === 'getTimetable') {
+      result.timetable = getTimetableData(ss);
+    } else if (action === 'saveTimetable') {
+      saveTimetableData(ss, postData.timetable || []);
+      result.message = 'Timetable saved successfully';
     } else if (action === 'clearAttendance') {
       var targetDate = params.date || postData.date;
       clearAttendanceData(ss, targetDate);
@@ -100,7 +105,7 @@ function handleRequest(e) {
 }
 
 function initSheets(ss) {
-  var sheetNames = ['Students', 'Attendance', 'Settings', 'Subjects'];
+  var sheetNames = ['Students', 'Attendance', 'Settings', 'Subjects', 'Timetable'];
   sheetNames.forEach(function(name) {
     var s = ss.getSheetByName(name);
     if (!s) {
@@ -117,6 +122,9 @@ function initSheets(ss) {
       } else if (name === 'Subjects') {
         s.appendRow(['Code', 'Name']);
         s.getRange(1, 1, 1, 2).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+      } else if (name === 'Timetable') {
+        s.appendRow(['Day', 'Start', 'End', 'Code', 'Subject']);
+        s.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
       }
     }
   });
@@ -317,6 +325,74 @@ function saveSubjectsData(ss, subjects) {
   }
   if (rows.length > 0) {
     s.getRange(2, 1, rows.length, 2).setValues(rows);
+  }
+}
+
+var KHMER_TO_EN_DAY = {
+  'ច័ន្ទ': 'Monday',
+  'ចន្ទ': 'Monday',
+  'អង្គារ': 'Tuesday',
+  'ពុធ': 'Wednesday',
+  'ព្រហស្បតិ៍': 'Thursday',
+  'ព្រហ': 'Thursday',
+  'សុក្រ': 'Friday',
+  'សៅរ៍': 'Saturday',
+  'អាទិត្យ': 'Sunday'
+};
+
+function formatTimeOnly(val) {
+  if (!val && val !== 0) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Asia/Phnom_Penh', 'HH:mm');
+  }
+  var str = String(val).trim();
+  var match = str.match(/^(\d{1,2}):(\d{2})/);
+  if (match) {
+    return match[1].padStart(2, '0') + ':' + match[2];
+  }
+  return str;
+}
+
+function getTimetableData(ss) {
+  var s = ss.getSheetByName('Timetable');
+  if (!s) return [];
+  var data = s.getDataRange().getValues();
+  var timetable = [];
+  for (var i = 1; i < data.length; i++) {
+    var rawDay = String(data[i][0]).trim();
+    if (!rawDay) continue;
+    var day = KHMER_TO_EN_DAY[rawDay] || (rawDay.charAt(0).toUpperCase() + rawDay.slice(1).toLowerCase());
+    var start = formatTimeOnly(data[i][1]);
+    var end = formatTimeOnly(data[i][2]);
+    var code = String(data[i][3]).trim();
+    var subject = String(data[i][4]).trim();
+    if (day && start && end && subject) {
+      timetable.push({
+        day: day,
+        start: start,
+        end: end,
+        code: code,
+        subject: subject
+      });
+    }
+  }
+  return timetable;
+}
+
+function saveTimetableData(ss, timetable) {
+  var s = ss.getSheetByName('Timetable');
+  if (!s) {
+    s = ss.insertSheet('Timetable');
+  }
+  s.clearContents();
+  s.appendRow(['Day', 'Start', 'End', 'Code', 'Subject']);
+  s.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  var rows = [];
+  timetable.forEach(function(item) {
+    rows.push([item.day, item.start, item.end, item.code || '', item.subject]);
+  });
+  if (rows.length > 0) {
+    s.getRange(2, 1, rows.length, 5).setValues(rows);
   }
 }
 

@@ -1,5 +1,6 @@
 const dayjs = require('dayjs');
 const { readJson, writeJson } = require('./config');
+const { isGoogleSheetEnabled, callGoogleSheet } = require('./googleSheet');
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const KHMER_DAYS = {
@@ -12,12 +13,46 @@ const KHMER_DAYS = {
   'Saturday': 'សៅរ៍'
 };
 
+let memoryTimetable = null;
+let hasSyncedTimetableFromGoogleSheet = false;
+
 function getTimetable() {
-  return readJson('timetable.json', []);
+  if (Array.isArray(memoryTimetable)) {
+    return memoryTimetable;
+  }
+  const fileData = readJson('timetable.json', []);
+  memoryTimetable = fileData;
+  return memoryTimetable;
 }
 
 function saveTimetable(timetable) {
+  memoryTimetable = timetable;
   writeJson('timetable.json', timetable);
+}
+
+async function syncTimetableFromGoogleSheet() {
+  if (!isGoogleSheetEnabled()) return;
+
+  try {
+    const res = await callGoogleSheet('getTimetable');
+    if (res && res.status === 'success' && Array.isArray(res.timetable)) {
+      hasSyncedTimetableFromGoogleSheet = true;
+      if (res.timetable.length > 0) {
+        memoryTimetable = res.timetable;
+      } else {
+        // Sheet exists but is empty -> populate with default template from local timetable.json
+        const defaultTimetable = readJson('timetable.json', []);
+        if (defaultTimetable.length > 0) {
+          await callGoogleSheet('saveTimetable', { timetable: defaultTimetable });
+          memoryTimetable = defaultTimetable;
+        } else {
+          memoryTimetable = [];
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Timetable] Error syncing timetable from Google Sheet:', err.message);
+  }
 }
 
 function getSubjectsDict() {
@@ -30,9 +65,9 @@ function saveSubjectsDict(dict) {
 
 /**
  * Update the Khmer subject name for a code (e.g. M2 -> គណិតវិទ្យា)
- * This automatically syncs all entries in timetable.json as well.
+ * This automatically syncs all entries in timetable as well.
  */
-function updateSubjectName(code, newName) {
+async function updateSubjectName(code, newName) {
   const upperCode = code.trim().toUpperCase();
   const dict = getSubjectsDict();
   dict[upperCode] = newName.trim();
@@ -46,6 +81,13 @@ function updateSubjectName(code, newName) {
     }
   });
   saveTimetable(timetable);
+
+  if (isGoogleSheetEnabled()) {
+    try {
+      await callGoogleSheet('saveTimetable', { timetable });
+      await callGoogleSheet('saveSubjects', { subjects: dict });
+    } catch (e) {}
+  }
 
   return dict;
 }
@@ -101,6 +143,7 @@ function getAllSubjects() {
 module.exports = {
   getTimetable,
   saveTimetable,
+  syncTimetableFromGoogleSheet,
   getSubjectsDict,
   saveSubjectsDict,
   updateSubjectName,

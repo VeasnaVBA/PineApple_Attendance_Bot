@@ -3,6 +3,7 @@ const path = require('path');
 const dayjs = require('dayjs');
 const { readJson, writeJson, RECORDS_DIR } = require('./config');
 const { isGoogleSheetEnabled, callGoogleSheet } = require('./googleSheet');
+const { syncTimetableFromGoogleSheet } = require('./timetable');
 
 let memoryStudents = null;
 let hasSyncedStudentsFromGoogleSheet = false;
@@ -283,7 +284,10 @@ async function syncFromGoogleSheet() {
       memoryStudents = sRes.students;
     }
 
-    // 2. Sync attendance records from Google Sheet
+    // 2. Sync timetable from Google Sheet
+    await syncTimetableFromGoogleSheet();
+
+    // 3. Sync attendance records from Google Sheet
     const gs = await callGoogleSheet('getAttendance');
     if (!gs || !Array.isArray(gs.records)) return;
 
