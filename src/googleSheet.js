@@ -19,13 +19,22 @@ async function callGoogleSheet(action, payload = {}, params = {}) {
     const query = new URLSearchParams({ action, ...params }).toString();
     const url = `${apiUrl}?${query}`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     const options = {
       method: payload && Object.keys(payload).length > 0 ? 'POST' : 'GET',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: payload && Object.keys(payload).length > 0 ? JSON.stringify({ action, ...payload }) : undefined
+      body: payload && Object.keys(payload).length > 0 ? JSON.stringify({ action, ...payload }) : undefined,
+      signal: controller.signal
     };
 
-    const response = await fetch(url, options);
+    let response;
+    try {
+      response = await fetch(url, options);
+    } finally {
+      clearTimeout(timeoutId);
+    }
     if (!response.ok) {
       console.warn(`[GoogleSheet] HTTP Error: ${response.status}`);
       return null;

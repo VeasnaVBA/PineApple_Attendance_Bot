@@ -345,8 +345,10 @@ async function syncFromGoogleSheet() {
           permission: records.filter(x => x.status === 'Permission').length,
           late: records.filter(x => x.status === 'Late').length
         };
+        const isNoTeacher = records.some(x => x.note === 'គ្មានគ្រូ' || x.status === 'NoTeacher');
         const recordObj = {
           ...sess,
+          noTeacher: isNoTeacher,
           summary
         };
         daily[slotKey] = recordObj;
@@ -362,7 +364,7 @@ async function syncFromGoogleSheet() {
  * Record attendance for a given subject and date.
  * All registered students not in parsedItems default to Present!
  */
-async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems }) {
+async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsedItems = [], isZeroAbsent = false, noTeacher = false }) {
   if (isGoogleSheetEnabled()) {
     await syncFromGoogleSheet();
   }
@@ -371,7 +373,7 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
   if (students.length === 0) {
     return {
       status: 'no_students',
-      summary: { total: 0, present: 0, absent: 0, permission: 0, late: 0 },
+      summary: { total: 0, present: 0, absent: 0, permission: 0, late: 0, noTeacher: Boolean(noTeacher) },
       matchedCount: 0,
       notFoundNames: (parsedItems || []).map(p => p.rawName)
     };
@@ -390,9 +392,13 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
     records: []
   };
 
+  if (noTeacher) {
+    isZeroAbsent = true;
+  }
+
   // Build map of existing recorded statuses to support adding more students to an existing session
   const existingMap = {};
-  if (Array.isArray(existingSubjectRecord.records)) {
+  if (!isZeroAbsent && Array.isArray(existingSubjectRecord.records)) {
     existingSubjectRecord.records.forEach(r => {
       if (r && r.id) {
         const idPad = String(r.id).padStart(2, '0');
@@ -409,24 +415,39 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
   const notFoundNames = [];
 
   const statusMap = {};
-  for (const item of parsedItems) {
-    const matched = findStudentMatch(item.rawName, students);
-    if (matched) {
-      const padId = String(matched.id).padStart(2, '0');
-      matchedStudentIds.add(padId);
-      statusMap[padId] = {
-        code: item.code,
-        status: item.status,
-        note: item.note
-      };
-    } else {
-      notFoundNames.push(item.rawName);
+  if (!isZeroAbsent) {
+    for (const item of parsedItems) {
+      const matched = findStudentMatch(item.rawName, students);
+      if (matched) {
+        const padId = String(matched.id).padStart(2, '0');
+        matchedStudentIds.add(padId);
+        statusMap[padId] = {
+          code: item.code,
+          status: item.status,
+          note: item.note
+        };
+      } else {
+        notFoundNames.push(item.rawName);
+      }
     }
   }
 
-  // Build complete list of all 30 students
+  // Build complete list of all students
   const fullRecords = students.map((stu, index) => {
     const padId = String(stu.id).padStart(2, '0');
+    if (isZeroAbsent) {
+      return {
+        no: index + 1,
+        id: padId,
+        name: stu.name,
+        gender: stu.gender || 'Unknown',
+        dob: stu.dob || '',
+        status: 'Present',
+        code: '✓',
+        note: noTeacher ? 'គ្មានគ្រូ' : ''
+      };
+    }
+
     // 1. Newly marked in this update has highest priority
     const mark = statusMap[padId];
     if (mark) {
@@ -473,7 +494,8 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
     present: fullRecords.filter(r => r.status === 'Present').length,
     absent: fullRecords.filter(r => r.status === 'Absent').length,
     permission: fullRecords.filter(r => r.status === 'Permission').length,
-    late: fullRecords.filter(r => r.status === 'Late').length
+    late: fullRecords.filter(r => r.status === 'Late').length,
+    noTeacher: Boolean(noTeacher)
   };
 
   const updatedSubjectRecord = {
@@ -482,6 +504,8 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
     timeSlot: timeSlot || existingSubjectRecord.timeSlot,
     recordedBy: recordedBy || existingSubjectRecord.recordedBy,
     updatedAt: new Date().toISOString(),
+    noTeacher: Boolean(noTeacher),
+    note: noTeacher ? 'គ្មានគ្រូ (No Teacher)' : (isZeroAbsent ? 'អវត្តមាន ០' : (existingSubjectRecord.note || '')),
     summary,
     records: fullRecords
   };
@@ -501,6 +525,7 @@ async function recordAttendance({ dateStr, subject, timeSlot, recordedBy, parsed
         timeSlot,
         subject,
         recordedBy,
+        noTeacher: Boolean(noTeacher),
         fullRecords
       });
     } catch (e) {
@@ -548,6 +573,7 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
           subject: rec.subject || k,
           code: rec.code || '',
           isRecorded: true,
+          noTeacher: Boolean(rec.noTeacher),
           recordedBy: rec.recordedBy || 'ប្រធានថ្នាក់',
           summary: rec.summary,
           records: rec.records || []
@@ -595,6 +621,7 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
         subject: slot.subject,
         code: slot.code || '',
         isRecorded: true,
+        noTeacher: Boolean(rec.noTeacher),
         recordedBy: rec.recordedBy || 'ប្រធានថ្នាក់',
         summary: rec.summary,
         records: rec.records
@@ -607,6 +634,7 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
         subject: slot.subject,
         code: slot.code || '',
         isRecorded: false,
+        noTeacher: false,
         recordedBy: null,
         summary: null,
         records: []
@@ -626,6 +654,7 @@ async function getDayAttendanceStatus(dateStr, timetableHelper) {
         subject: rec.subject || k,
         code: rec.code || '',
         isRecorded: true,
+        noTeacher: Boolean(rec.noTeacher),
         recordedBy: rec.recordedBy || 'ប្រធានថ្នាក់',
         summary: rec.summary,
         records: rec.records || []
@@ -693,6 +722,7 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
   let totalScheduledSessions = 0;
   let totalRecordedSessions = 0;
   let totalMissedSessions = 0;
+  let totalNoTeacherSessions = 0;
 
   daysList.forEach(day => {
     totalScheduledSessions += day.totalSessions;
@@ -700,6 +730,10 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
     totalMissedSessions += day.missedCount;
 
     day.scheduledSessions.forEach(session => {
+      if (session.isRecorded && session.noTeacher) {
+        totalNoTeacherSessions++;
+      }
+
       if (!subjectStats[session.subject]) {
         subjectStats[session.subject] = {
           subject: session.subject,
@@ -707,6 +741,7 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
           scheduled: 0,
           recorded: 0,
           missed: 0,
+          noTeacher: 0,
           absent: 0,
           permission: 0,
           late: 0
@@ -715,6 +750,9 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
       subjectStats[session.subject].scheduled++;
       if (session.isRecorded) {
         subjectStats[session.subject].recorded++;
+        if (session.noTeacher) {
+          subjectStats[session.subject].noTeacher++;
+        }
       } else {
         subjectStats[session.subject].missed++;
       }
@@ -725,7 +763,10 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
           const st = studentMap[cleanRecId] || studentMap[rec.id] || Object.values(studentMap).find(s => s.name === rec.name);
           if (st) {
             st.totalSessions++;
-            if (rec.status === 'Absent' || rec.code === 'A') {
+            if (session.noTeacher) {
+              // Teacher was absent: absent is 0! Student is present
+              st.present++;
+            } else if (rec.status === 'Absent' || rec.code === 'A') {
               st.absent++;
               subjectStats[session.subject].absent++;
             } else if (rec.status === 'Permission' || rec.code === 'P') {
@@ -768,6 +809,7 @@ async function getRangeAttendanceStatus(startDateStr, endDateStr, timetableHelpe
     totalScheduledSessions,
     totalRecordedSessions,
     totalMissedSessions,
+    totalNoTeacherSessions,
     studentSummaries,
     subjectStats: Object.values(subjectStats)
   };

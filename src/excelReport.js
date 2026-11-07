@@ -257,9 +257,13 @@ async function generateFullDayExcel(dayStatus) {
 
   matrixSheet.getCell('D4').value = 'ស្ថានភាពកត់ត្រា:';
   matrixSheet.getCell('D4').font = { bold: true };
-  const statusStr = missedCount === 0
-    ? `✅ កត់គ្រប់ ${totalSessions} ម៉ោង`
-    : `⚠️ កត់បាន ${recordedCount}/${totalSessions} ម៉ោង (ភ្លេចកត់ ${missedCount} ម៉ោង)`;
+  const noTeacherCount = scheduledSessions.filter(s => s.isRecorded && s.noTeacher).length;
+  let statusStr = '';
+  if (missedCount === 0) {
+    statusStr = `✅ កត់គ្រប់ ${totalSessions} ម៉ោង${noTeacherCount > 0 ? ` (គ្មានគ្រូ ${noTeacherCount} ម៉ោង)` : ''}`;
+  } else {
+    statusStr = `⚠️ កត់បាន ${recordedCount}/${totalSessions} ម៉ោង (ភ្លេចកត់ ${missedCount} ម៉ោង${noTeacherCount > 0 ? `, គ្មានគ្រូ ${noTeacherCount} ម៉ោង` : ''})`;
+  }
   matrixSheet.getCell('E4').value = statusStr;
   matrixSheet.getCell('E4').font = { bold: true, color: { argb: missedCount > 0 ? 'C00000' : '008000' } };
 
@@ -274,9 +278,15 @@ async function generateFullDayExcel(dayStatus) {
     const colIdx = 6 + idx;
     const cell = matrixSheet.getCell(7, colIdx);
     if (s.isRecorded) {
-      cell.value = `✅ បានកត់ (${s.recordedBy})`;
-      cell.font = { size: 9, bold: true, color: { argb: '155724' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'D4EDDA' } };
+      if (s.noTeacher) {
+        cell.value = `🚫 គ្មានគ្រូ (${s.recordedBy || 'ប្រធានថ្នាក់'})`;
+        cell.font = { size: 9, bold: true, color: { argb: 'C65911' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0E6' } };
+      } else {
+        cell.value = `✅ បានកត់ (${s.recordedBy})`;
+        cell.font = { size: 9, bold: true, color: { argb: '155724' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'D4EDDA' } };
+      }
     } else {
       cell.value = `⚠️ ភ្លេចកត់ត្រា!`;
       cell.font = { size: 9, bold: true, color: { argb: '721C24' } };
@@ -301,9 +311,15 @@ async function generateFullDayExcel(dayStatus) {
   // Session columns headers
   scheduledSessions.forEach((s, i) => {
     const cell = headerRow.getCell(6 + i);
-    cell.value = `${s.timeSlot}\n${s.code || s.subject}`;
+    cell.value = s.noTeacher
+      ? `${s.timeSlot}\n${s.code || s.subject}\n(🚫 គ្មានគ្រូ)`
+      : `${s.timeSlot}\n${s.code || s.subject}`;
     cell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 9 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: s.isRecorded ? '1F4E78' : '808080' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: s.isRecorded ? (s.noTeacher ? 'C65911' : '1F4E78') : '808080' }
+    };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
 
@@ -350,6 +366,12 @@ async function generateFullDayExcel(dayStatus) {
         cell.value = '⚠️ ភ្លេចកត់';
         cell.font = { size: 9, italic: true, color: { argb: '6C757D' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F0F0F0' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (s.noTeacher) {
+        // Teacher absent: absent is 0!
+        cell.value = '🚫';
+        cell.font = { size: 9, color: { argb: 'C65911' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0E6' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       } else {
         const sId = String(stu.id || '').padStart(2, '0');
@@ -442,10 +464,16 @@ async function generateFullDayExcel(dayStatus) {
 
     detailSheet.mergeCells('A1:G1');
     const dTitle = detailSheet.getCell('A1');
-    dTitle.value = `វត្តមានម៉ោង: ${s.timeSlot} - ${s.subject}`;
+    dTitle.value = s.noTeacher
+      ? `វត្តមានម៉ោង: ${s.timeSlot} - ${s.subject} (🚫 គ្មានគ្រូ / No Teacher)`
+      : `វត្តមានម៉ោង: ${s.timeSlot} - ${s.subject}`;
     dTitle.font = { bold: true, size: 14, color: { argb: 'FFFFFF' } };
     dTitle.alignment = { horizontal: 'center', vertical: 'middle' };
-    dTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: s.isRecorded ? '1F4E78' : 'C00000' } };
+    dTitle.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: s.isRecorded ? (s.noTeacher ? 'C65911' : '1F4E78') : 'C00000' }
+    };
     detailSheet.getRow(1).height = 32;
 
     if (!s.isRecorded) {
@@ -455,6 +483,13 @@ async function generateFullDayExcel(dayStatus) {
       warnCell.font = { bold: true, size: 13, color: { argb: '721C24' } };
       warnCell.alignment = { horizontal: 'center', vertical: 'middle' };
       warnCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'F8D7DA' } };
+    } else if (s.noTeacher) {
+      detailSheet.mergeCells('A3:G4');
+      const warnCell = detailSheet.getCell('A3');
+      warnCell.value = '🚫 ម៉ោងសិក្សានេះ មិនមានការបង្រៀនទេ ដោយសារអវត្តមានលោកគ្រូ/អ្នកគ្រូ (គ្មានគ្រូ)\nសិស្សទាំងអស់ត្រូវបានកត់សម្គាល់ថា "អវត្តមាន ០ នាក់" (Absent: 0)';
+      warnCell.font = { bold: true, size: 12, color: { argb: 'C65911' } };
+      warnCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      warnCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0E6' } };
     } else {
       // Show details
       const headers = ['ល.រ', 'អត្តលេខ', 'នាមត្រកូល-នាមខ្លួន', 'ភេទ', 'ថ្ងៃកំណើត', 'ស្ថានភាព', 'សម្គាល់/មូលហេតុ'];
@@ -541,6 +576,7 @@ async function generateRangeExcelReport(rangeData) {
     totalScheduledSessions,
     totalRecordedSessions,
     totalMissedSessions,
+    totalNoTeacherSessions = 0,
     studentSummaries,
     subjectStats,
     customTitle,
@@ -556,15 +592,18 @@ async function generateRangeExcelReport(rangeData) {
   const THEME_HEADER_FILL = '1F4E78';
   const BORDER_COLOR = 'D9D9D9';
 
-  // --- SHEET 1: សង្ខេបប្រចាំខែ (MONTHLY SUMMARY & RANKING) ---
-  const summarySheet = workbook.addWorksheet('សង្ខេបប្រចាំខែ', {
+  // --- SHEET 1: សង្ខេបប្រចាំខែ / សង្ខេបប្រចាំសប្តាហ៍ ---
+  const isWeekly = (customTitle && (customTitle.includes('សប្តាហ៍') || /weekly/i.test(customTitle))) ||
+                   (customFileName && /weekly/i.test(customFileName));
+  const sheet1Name = isWeekly ? 'សង្ខេបប្រចាំសប្តាហ៍' : 'សង្ខេបប្រចាំខែ';
+  const summarySheet = workbook.addWorksheet(sheet1Name, {
     views: [{ showGridLines: true }]
   });
 
   // Title
   summarySheet.mergeCells('A1:K1');
   const tCell = summarySheet.getCell('A1');
-  tCell.value = customTitle || `របាយការណ៍វត្តមានសិស្សសរុប (ATTENDANCE REPORT)`;
+  tCell.value = customTitle || (isWeekly ? 'របាយការណ៍វត្តមានសិស្សប្រចាំសប្តាហ៍ (WEEKLY ATTENDANCE REPORT)' : `របាយការណ៍វត្តមានសិស្សសរុប (ATTENDANCE REPORT)`);
   tCell.font = { name: FONT_FAMILY, size: 15, bold: true, color: { argb: 'FFFFFF' } };
   tCell.alignment = { horizontal: 'center', vertical: 'middle' };
   tCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME_HEADER_FILL } };
@@ -585,7 +624,7 @@ async function generateRangeExcelReport(rangeData) {
 
   summarySheet.getCell('D4').value = 'ទិន្នន័យម៉ោងសិក្សា:';
   summarySheet.getCell('D4').font = { bold: true };
-  summarySheet.getCell('E4').value = `${totalSchoolDays} ថ្ងៃរៀន | សរុប ${totalScheduledSessions} ម៉ោង (កត់ ${totalRecordedSessions}, ភ្លេច ${totalMissedSessions})`;
+  summarySheet.getCell('E4').value = `${totalSchoolDays} ថ្ងៃរៀន | សរុប ${totalScheduledSessions} ម៉ោង (កត់ ${totalRecordedSessions}${totalNoTeacherSessions > 0 ? `, គ្មានគ្រូ ${totalNoTeacherSessions}` : ''}, ភ្លេច ${totalMissedSessions})`;
 
   // Summary KPI Cards (Row 6 & 7)
   let totalClassAbsences = 0;
@@ -607,7 +646,8 @@ async function generateRangeExcelReport(rangeData) {
     { label: 'អវត្តមានសរុប (A)', val: totalClassAbsences, bg: 'F8D7DA', fg: '721C24', col: 'C' },
     { label: 'ច្បាប់សរុប (P)', val: totalClassPermissions, bg: 'FFF3CD', fg: '856404', col: 'D' },
     { label: 'យឺតសរុប (L)', val: totalClassLates, bg: 'E2E3E5', fg: '383D41', col: 'E' },
-    { label: 'មធ្យមភាគវត្តមាន', val: avgAttendance, bg: 'D4EDDA', fg: '155724', col: 'F' }
+    { label: 'គ្មានគ្រូ (No Teacher)', val: totalNoTeacherSessions || 0, bg: 'FFF0E6', fg: 'C65911', col: 'F' },
+    { label: 'មធ្យមភាគវត្តមាន', val: avgAttendance, bg: 'D4EDDA', fg: '155724', col: 'G' }
   ];
 
   summarySheet.getRow(6).height = 18;
@@ -799,10 +839,14 @@ async function generateRangeExcelReport(rangeData) {
       let hasPermission = false;
       let hasLate = false;
       let anyRecorded = false;
+      let allNoTeacher = true;
 
       d.scheduledSessions.forEach(session => {
         if (session.isRecorded) {
           anyRecorded = true;
+          if (!session.noTeacher) {
+            allNoTeacher = false;
+          }
           const rec = session.records.find(r => r.id === st.id);
           if (rec) {
             if (rec.status === 'Absent' || rec.code === 'A') hasAbsent = true;
@@ -830,6 +874,11 @@ async function generateRangeExcelReport(rangeData) {
         cell.value = 'L';
         cell.font = { bold: true, color: { argb: '383D41' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'E2E3E5' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (allNoTeacher && d.scheduledSessions.length > 0) {
+        cell.value = '🚫';
+        cell.font = { size: 9, color: { argb: 'C65911' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0E6' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       } else {
         cell.value = '✓';
@@ -864,7 +913,7 @@ async function generateRangeExcelReport(rangeData) {
     views: [{ showGridLines: true }]
   });
 
-  subjSheet.mergeCells('A1:G1');
+  subjSheet.mergeCells('A1:H1');
   const sTitle = subjSheet.getCell('A1');
   sTitle.value = 'ស្ថិតិវត្តមានតាមមុខវិជ្ជានីមួយៗ (SUBJECT ATTENDANCE SUMMARY)';
   sTitle.font = { bold: true, size: 14, color: { argb: 'FFFFFF' } };
@@ -872,7 +921,7 @@ async function generateRangeExcelReport(rangeData) {
   sTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: THEME_HEADER_FILL } };
   subjSheet.getRow(1).height = 32;
 
-  const sHeaders = ['ល.រ', 'មុខវិជ្ជា', 'កូដ', 'ម៉ោងបង្រៀនសរុប', 'បានកត់ត្រា', 'អវត្តមានសរុប (A)', 'ច្បាប់សរុប (P)'];
+  const sHeaders = ['ល.រ', 'មុខវិជ្ជា', 'កូដ', 'ម៉ោងបង្រៀនសរុប', 'បានកត់ត្រា', 'គ្មានគ្រូ', 'អវត្តមានសរុប (A)', 'ច្បាប់សរុប (P)'];
   const sHRow = subjSheet.getRow(3);
   sHRow.height = 24;
   sHeaders.forEach((h, idx) => {
@@ -896,12 +945,21 @@ async function generateRangeExcelReport(rangeData) {
     r.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
     r.getCell(5).value = sb.recorded;
     r.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
-    r.getCell(6).value = sb.absent;
-    r.getCell(6).alignment = { horizontal: 'center', vertical: 'middle' };
-    r.getCell(7).value = sb.permission;
-    r.getCell(7).alignment = { horizontal: 'center', vertical: 'middle' };
+    
+    const ntCell = r.getCell(6);
+    ntCell.value = sb.noTeacher || 0;
+    ntCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    if (sb.noTeacher > 0) {
+      ntCell.font = { bold: true, color: { argb: 'C65911' } };
+      ntCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0E6' } };
+    }
 
-    for (let c = 1; c <= 7; c++) {
+    r.getCell(7).value = sb.absent;
+    r.getCell(7).alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(8).value = sb.permission;
+    r.getCell(8).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    for (let c = 1; c <= 8; c++) {
       r.getCell(c).border = {
         top: { style: 'thin', color: { argb: BORDER_COLOR } },
         bottom: { style: 'thin', color: { argb: BORDER_COLOR } },
@@ -917,6 +975,7 @@ async function generateRangeExcelReport(rangeData) {
     { width: 28 },
     { width: 12 },
     { width: 18 },
+    { width: 16 },
     { width: 16 },
     { width: 18 },
     { width: 18 }
